@@ -103,6 +103,17 @@ set(CMAKE_CXX_FLAGS "${NES_WARNINGS} -fno-omit-frame-pointer ${NES_SPECIFIC_FLAG
 set(CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/nes-plugins")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/nes-plugins")
 
+# Nix build support: Use proper linking without polluting RPATH
+if(DEFINED ENV{IN_NIX_SHELL} OR DEFINED ENV{NIX_STORE})
+    message(STATUS "Detected Nix environment - using clean RPATH strategy")
+    
+    # Let CMake automatically determine RPATH from linked libraries
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+    
+    # Keep build RPATH clean with just local plugins
+    message(STATUS "Using clean build RPATH: ${CMAKE_BUILD_RPATH}")
+endif()
+
 if (ENABLE_FTIME_TRACE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftime-trace")
     message(STATUS "Use ftime-trace")

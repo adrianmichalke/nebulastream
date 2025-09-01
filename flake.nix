@@ -54,6 +54,16 @@
             EOF
           '';
         };
+        
+        
+        # Build spdlog with fmt_11 for compatibility  
+        spdlogWithFmt11 = pkgs.spdlog.overrideAttrs (oldAttrs: {
+          buildInputs = (oldAttrs.buildInputs or []) ++ [pkgs.fmt_11];
+          cmakeFlags = (oldAttrs.cmakeFlags or []) ++ [
+            "-DSPDLOG_FMT_EXTERNAL=ON"
+            "-DSPDLOG_BUILD_SHARED=ON"
+          ];
+        });
       in
       with pkgs;
       mkShell {
@@ -81,9 +91,10 @@
             libxml2
             zlib
             grpc
-            protobuf_27
+            protobuf
+            abseil-cpp
             fmt_11
-            spdlog
+            spdlogWithFmt11
             gtest
             gbenchmark
             nlohmann_json
@@ -170,7 +181,36 @@
           echo "LLVM 18 compiler symlinks created in $CLANG_SYMLINK_DIR"
         '';
 
-	    LD_LIBRARY_PATH = "${stdenv.cc.cc.lib}/lib";
+	    LD_LIBRARY_PATH = lib.makeLibraryPath ([
+            stdenv.cc.cc.lib
+            yaml-cpp
+            grpc
+            protobuf
+            abseil-cpp
+            fmt_11
+            spdlogWithFmt11
+            folly
+            glog
+            gflags
+            boost
+            openssl
+            zlib
+            zstd
+            cpptrace
+            libffi
+            re2
+            c-ares
+            xz
+            lz4
+            libunwind
+            double-conversion
+            libevent
+            icu
+            nautilusPackage
+        ] ++ (with llvmPackages_19; [
+            llvm
+            mlir
+        ]));
 
 	    # CMake and pkg-config paths for all dependencies
 	    CMAKE_PREFIX_PATH = with pkgs; lib.makeSearchPath "lib/cmake" [
@@ -180,9 +220,10 @@
             folly
             boost
             glog
+            abseil-cpp
             magic-enum
             fmt_11
-            spdlog
+            spdlogWithFmt11
             yaml-cpp
             nlohmann_json
             gtest
@@ -191,11 +232,12 @@
             openssl
             zlib
             grpc
-            protobuf_27
+            protobuf
             antlr4
             antlr4.runtime.cpp
             argparse
             libcuckoo
+            llvmPackages_19.libcxx
         ] + ":" + lib.makeSearchPath "" [
             "${llvmPackages_19.clang}"
             "${llvmPackages_19.llvm}"
@@ -206,13 +248,14 @@
             folly
             boost
             glog
+            abseil-cpp
             fmt_11
-            spdlog
+            spdlogWithFmt11
             yaml-cpp
             nlohmann_json
             openssl
             zlib
-            protobuf_27
+            protobuf
         ];
       };
   };
