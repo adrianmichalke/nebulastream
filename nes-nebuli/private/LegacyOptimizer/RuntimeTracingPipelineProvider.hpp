@@ -11,20 +11,22 @@
     See the License for the specific language governing permissions and
     limitations under the License.
 */
-
 #pragma once
 
-#include <cstdint>
+#include <Execution/Pipelines/ExecutablePipelineProvider.hpp>
+#include <nautilus/options.hpp>
+namespace NES::Runtime::Execution
+{
 
-namespace NES
+/**
+ * @brief Creates an executable pipeline stage that uses runtime tracing
+ */
+class RuntimeTracingPipelineProvider : public ExecutablePipelineProvider
 {
-enum class ExecutionMode : uint8_t
-{
-    /// Uses the interpretation based nautilus backend.
-    INTERPRETER,
-    /// Uses the compilation based nautilus backend.
-    COMPILER,
-    /// Uses runtime tracing for execution tracing and replay.
-    RUNTIME_TRACE
+public:
+    std::unique_ptr<ExecutablePipelineStage>
+    create(std::shared_ptr<PhysicalOperatorPipeline> pipeline, nautilus::engine::Options& options) override;
 };
+
+std::unique_ptr<ExecutablePipelineProvider> RegisterRuntimeTracingPipelineProvider();
 }
