@@ -138,7 +138,7 @@ template <typename T>
 std::vector<T> splitWithStringDelimiter(std::string_view inputString, std::string_view delim)
 {
     return std::views::split(inputString, delim) | std::views::filter([](const auto& split) { return !split.empty(); })
-        | std::views::transform([](const auto& split) { return from_chars<T>(std::string_view(split)); })
+        | std::views::transform([](const auto& split) { return from_chars<T>(std::string_view(split.begin(), split.end())); })
         | std::views::filter([](auto optional) { return optional.has_value(); })
         | std::views::transform([](auto optional) { return *optional; }) | std::ranges::to<std::vector>();
 }

@@ -22,6 +22,7 @@
 #include <utility>
 #include <Util/Logger/Logger.hpp>
 #include <fmt/format.h>
+#include <fmt/chrono.h>
 
 namespace NES
 {

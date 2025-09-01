@@ -13,7 +13,7 @@
 add_subdirectory(src)
 get_source(nes-sql-parser SQL_PARSER_SOURCE_FILES)
 
-find_package(antlr4-generator CONFIG REQUIRED)
+find_package(antlr4-generator CONFIG)
 
 set(ANTLR_JAR_FILE "antlr-${ANTLR_VERSION}-complete.jar")
 
@@ -43,7 +43,7 @@ antlr4_generate(NES_SQL_PARSER ${CMAKE_CURRENT_SOURCE_DIR}/AntlrSQL.g4 BOTH -lis
 
 # The VCPKG port is called 'antlr4', finding the package requires to look for 'antlr4-runtime' and
 # adding antlr library as a dependency to another library, requires to link against 'antlr-static'.
-find_package(antlr4-runtime CONFIG REQUIRED)
+find_package(antlr4-runtime CONFIG)
 add_library(nes-sql-parser ${SQL_PARSER_SOURCE_FILES} ${ANTLR4_SRC_FILES_NES_SQL_PARSER})
 
 target_include_directories(nes-sql-parser PUBLIC

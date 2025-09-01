@@ -41,9 +41,9 @@ struct formatter<cpptrace::nullable<unsigned int>>
     {
         if (nullable.has_value())
         {
-            return format_to(ctx.out(), "{}", nullable.value());
+            return fmt::format_to(ctx.out(), "{}", nullable.value());
         }
-        return format_to(ctx.out(), "unknown");
+        return fmt::format_to(ctx.out(), "unknown");
     }
 };
 }
