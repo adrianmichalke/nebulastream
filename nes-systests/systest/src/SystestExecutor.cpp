@@ -55,7 +55,7 @@
 #include <SystestConfiguration.hpp>
 #include <SystestRunner.hpp>
 #include <SystestState.hpp>
-#include <from_current.hpp>
+#include <cpptrace/from_current.hpp>
 
 
 using namespace std::literals;

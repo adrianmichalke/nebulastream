@@ -127,7 +127,7 @@ bool TCPSource::tryToConnect(const addrinfo* result, const int flags)
         {
             close();
             /// if connection was unsuccessful, throw an exception with context using errno
-            strerror_r(errno, errBuffer.data(), errBuffer.size());
+            [[maybe_unused]] auto result = strerror_r(errno, errBuffer.data(), errBuffer.size());
             throw CannotOpenSource("Could not connect to: {}:{}. {}", socketHost, socketPort, errBuffer.data());
         }
 
@@ -144,7 +144,7 @@ bool TCPSource::tryToConnect(const addrinfo* result, const int flags)
             /// Timeout or error
             errno = ETIMEDOUT;
             close();
-            strerror_r(errno, errBuffer.data(), errBuffer.size());
+            [[maybe_unused]] auto result = strerror_r(errno, errBuffer.data(), errBuffer.size());
             throw CannotOpenSource("Could not connect to: {}:{}. {}", socketHost, socketPort, errBuffer.data());
         }
 
@@ -155,7 +155,7 @@ bool TCPSource::tryToConnect(const addrinfo* result, const int flags)
         {
             errno = error;
             close();
-            strerror_r(errno, errBuffer.data(), errBuffer.size());
+            [[maybe_unused]] auto result = strerror_r(errno, errBuffer.data(), errBuffer.size());
             throw CannotOpenSource("Could not connect to: {}:{}. {}", socketHost, socketPort, errBuffer.data());
         }
     }

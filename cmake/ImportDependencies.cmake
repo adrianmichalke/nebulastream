@@ -30,7 +30,14 @@ endif ()
 # NES_PREBUILT_VCPKG_ROOT -> Docker Environment with pre-built sdk.
 # VCPKG_ROOT              -> user-managed vcpkg install. Will build dependencies locally
 # NONE                    -> setup VCPKG Repository in project. Will build dependencies locally
-if ($CACHE{DOCKER_DEV_IMAGE})
+# IN_NIX_SHELL            -> Nix environment provides dependencies directly, skip vcpkg
+
+# Skip vcpkg entirely when in Nix environment as dependencies are provided by Nix
+if (DEFINED ENV{IN_NIX_SHELL})
+    message(STATUS "Detected Nix environment - skipping vcpkg setup as dependencies are provided by Nix")
+    # Ensure MLIR local option is used in Nix
+    set(USE_LOCAL_MLIR ON CACHE BOOL "Using local MLIR in Nix environment" FORCE)
+elseif ($CACHE{DOCKER_DEV_IMAGE})
     # If we detect the NES_PREBUILT_VCPKG_ROOT environment we assume we are running in an environment
     # where an exported vcpkg sdk was prepared. This means we will not run in manifest mode,
     # We check if the VCPKG_DEPENDENCY_HASH environment matches the current hash
@@ -93,16 +100,18 @@ if (NOT ${USE_LOCAL_MLIR})
     list(APPEND VCPKG_MANIFEST_FEATURES "mlir")
 else ()
     message(STATUS "Using locally installed MLIR")
-    # This code is called before VCPKG and before project() has been called. This means many configuration have not
-    # been set by cmake. LLVM has a few shared libraries (which we do not use), that require the target machine to
-    # support dynamic linking (which is usually the case unless working with small embedded devices).
+    # MLIR detection is delayed until after project() command sets up languages
+    # This avoids FFI check issues that require CXX to be enabled
     SET_PROPERTY(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS TRUE)
-    find_package(MLIR CONFIG QUIET)
-    # One way to propagate configurations to third-party libraries (in this case nautilus) is via environment variables.
-    # The nautilus vcpkg port script will pick up the MLIR_DIR environment variable during build, which allows the
-    # nautilus cmake configuration to find the locally installed version of MLIR.
-    SET(ENV{MLIR_DIR} "${MLIR_DIR}")
-    list(APPEND VCPKG_ENV_PASSTHROUGH "MLIR_DIR")
+    # In Nix environment, MLIR detection will be handled later after project() command
+    if (NOT DEFINED ENV{IN_NIX_SHELL})
+        find_package(MLIR CONFIG QUIET)
+        # One way to propagate configurations to third-party libraries (in this case nautilus) is via environment variables.
+        # The nautilus vcpkg port script will pick up the MLIR_DIR environment variable during build, which allows the
+        # nautilus cmake configuration to find the locally installed version of MLIR.
+        SET(ENV{MLIR_DIR} "${MLIR_DIR}")
+        list(APPEND VCPKG_ENV_PASSTHROUGH "MLIR_DIR")
+    endif()
 endif ()
 
 SET(VCPKG_STDLIB "libcxx")

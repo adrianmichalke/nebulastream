@@ -1,13 +1,25 @@
 # Findfolly.cmake - NebulaStream compatibility wrapper
-# This module provides lowercase folly:: targets for Nix compatibility
+# This module provides lowercase folly:: targets for compatibility across different environments
 #
-# The Nix folly package provides Folly::folly (capital F) but NebulaStream
-# expects folly::folly (lowercase f). This wrapper creates the needed aliases.
+# - Nix environment: Provides Folly::folly, we create folly::folly alias
+# - vcpkg environment: May provide different target names
+# - System environment: Uses pkg-config fallback
+
+# Check if aliases were already created (e.g., by main CMakeLists.txt in Nix environment)
+if(TARGET folly::folly)
+    # Aliases already exist, just mark as found
+    set(folly_FOUND TRUE PARENT_SCOPE)
+    set(FOLLY_FOUND TRUE PARENT_SCOPE)
+    set(folly_FOUND TRUE)
+    set(FOLLY_FOUND TRUE)
+    message(STATUS "Found folly: Using existing target")
+    return()
+endif()
 
 # Ensure glog is available for folly
 find_package(glog CONFIG QUIET)
 
-# Find the Nix-provided Folly package (capital F)
+# Try to find Folly with CONFIG mode first (Nix, vcpkg environments)
 find_package(Folly CONFIG QUIET)
 
 if(Folly_FOUND)
@@ -44,14 +56,38 @@ if(Folly_FOUND)
     set(FOLLY_FOUND TRUE)
     set(FOLLY_VERSION ${Folly_VERSION})
     
-    message(STATUS "Found folly via Nix: ${folly_VERSION}")
+    message(STATUS "Found folly: ${folly_VERSION}")
 else()
+    # Try pkg-config as fallback for system installations
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FOLLY_PKG folly)
+        if(FOLLY_PKG_FOUND)
+            # Create imported target from pkg-config results
+            add_library(folly::folly INTERFACE IMPORTED)
+            target_link_libraries(folly::folly INTERFACE ${FOLLY_PKG_LIBRARIES})
+            target_include_directories(folly::folly INTERFACE ${FOLLY_PKG_INCLUDE_DIRS})
+            target_compile_options(folly::folly INTERFACE ${FOLLY_PKG_CFLAGS_OTHER})
+            
+            set(folly_FOUND TRUE PARENT_SCOPE)
+            set(FOLLY_FOUND TRUE PARENT_SCOPE)
+            set(folly_FOUND TRUE)
+            set(FOLLY_FOUND TRUE)
+            set(folly_VERSION ${FOLLY_PKG_VERSION} PARENT_SCOPE)
+            set(FOLLY_VERSION ${FOLLY_PKG_VERSION} PARENT_SCOPE)
+            
+            message(STATUS "Found folly via pkg-config: ${FOLLY_PKG_VERSION}")
+            return()
+        endif()
+    endif()
+    
+    # Neither CONFIG nor pkg-config found folly
     set(folly_FOUND FALSE PARENT_SCOPE)
     set(FOLLY_FOUND FALSE PARENT_SCOPE)
     set(folly_FOUND FALSE)
     set(FOLLY_FOUND FALSE)
     if(folly_FIND_REQUIRED)
-        message(FATAL_ERROR "Could not find folly package")
+        message(FATAL_ERROR "Could not find folly package via CONFIG or pkg-config")
     elseif(NOT folly_FIND_QUIETLY)
         message(STATUS "Could not find folly package")
     endif()

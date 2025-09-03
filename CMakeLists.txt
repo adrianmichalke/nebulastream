@@ -65,6 +65,14 @@ project(NES LANGUAGES C CXX)
 set(VCPKG_POLICY_ALLOW_RESTRICTED_HEADERS enabled)
 message(STATUS "Going to use ${CMAKE_CXX_COMPILER}")
 
+# Handle MLIR detection for Nix environment after project() command
+if (DEFINED ENV{IN_NIX_SHELL} AND USE_LOCAL_MLIR)
+    message(STATUS "Finding MLIR in Nix environment")
+    find_package(MLIR CONFIG REQUIRED)
+    set(ENV{MLIR_DIR} "${MLIR_DIR}")
+    message(STATUS "Found MLIR at: ${MLIR_DIR}")
+endif()
+
 # Emit warning if non clang-based compiler is used.
 if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(WARNING "This project only supports clang. You are using ${CMAKE_CXX_COMPILER_ID} in version ${CMAKE_CXX_COMPILER_VERSION}")
@@ -179,31 +187,105 @@ message(STATUS "CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 message(STATUS "CMAKE_CXX_FLAGS_BENCHMARK: ${CMAKE_CXX_FLAGS_BENCHMARK}")
 
 
-# Find Protobuf installation
-# Looks for protobuf-config.cmake file installed by Protobuf's cmake installation.
-set(protobuf_MODULE_COMPATIBLE TRUE)
-find_package(Protobuf REQUIRED)
-message(STATUS "Using protobuf ${protobuf_VERSION}")
+# Find Protobuf and gRPC installation
+if (DEFINED ENV{IN_NIX_SHELL})
+    # In Nix environment, use pkg-config to avoid target conflicts
+    message(STATUS "Using Nix-provided protobuf and gRPC via pkg-config")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(PROTOBUF REQUIRED protobuf)
+    pkg_check_modules(GRPC REQUIRED grpc++)
+    
+    # Create imported targets for compatibility
+    add_library(protobuf::libprotobuf INTERFACE IMPORTED)
+    target_link_libraries(protobuf::libprotobuf INTERFACE ${PROTOBUF_LIBRARIES})
+    target_include_directories(protobuf::libprotobuf INTERFACE ${PROTOBUF_INCLUDE_DIRS})
+    target_compile_options(protobuf::libprotobuf INTERFACE ${PROTOBUF_CFLAGS_OTHER})
+    
+    add_library(gRPC::grpc++ INTERFACE IMPORTED)
+    target_link_libraries(gRPC::grpc++ INTERFACE ${GRPC_LIBRARIES})
+    target_include_directories(gRPC::grpc++ INTERFACE ${GRPC_INCLUDE_DIRS})
+    target_compile_options(gRPC::grpc++ INTERFACE ${GRPC_CFLAGS_OTHER})
+    
+    # Set up protoc and grpc plugin paths
+    find_program(_PROTOBUF_PROTOC protoc REQUIRED)
+    find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin REQUIRED)
+    
+    set(_PROTOBUF_LIBPROTOBUF protobuf::libprotobuf)
+    set(_GRPC_GRPCPP gRPC::grpc++)
+    
+    message(STATUS "Using protobuf from Nix")
+    message(STATUS "Using gRPC from Nix")
+else()
+    # Standard vcpkg-based dependency resolution
+    # Looks for protobuf-config.cmake file installed by Protobuf's cmake installation.
+    set(protobuf_MODULE_COMPATIBLE TRUE)
+    find_package(Protobuf REQUIRED)
+    message(STATUS "Using protobuf ${protobuf_VERSION}")
 
-set(_PROTOBUF_LIBPROTOBUF protobuf::libprotobuf)
-if (CMAKE_CROSSCOMPILING)
-    find_program(_PROTOBUF_PROTOC protoc)
-else ()
-    set(_PROTOBUF_PROTOC $<TARGET_FILE:protobuf::protoc>)
-endif ()
+    set(_PROTOBUF_LIBPROTOBUF protobuf::libprotobuf)
+    if (CMAKE_CROSSCOMPILING)
+        find_program(_PROTOBUF_PROTOC protoc)
+    else ()
+        set(_PROTOBUF_PROTOC $<TARGET_FILE:protobuf::protoc>)
+    endif ()
 
-# Find gRPC installation
-# Looks for gRPCConfig.cmake file installed by gRPC's cmake installation.
-find_package(gRPC CONFIG REQUIRED)
-message(STATUS "Using gRPC ${gRPC_VERSION}")
+    # Find gRPC installation
+    # Looks for gRPCConfig.cmake file installed by gRPC's cmake installation.
+    find_package(gRPC CONFIG REQUIRED)
+    message(STATUS "Using gRPC ${gRPC_VERSION}")
 
-set(_GRPC_GRPCPP gRPC::grpc++)
-if (CMAKE_CROSSCOMPILING)
-    find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)
-else ()
-    set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
-endif ()
+    set(_GRPC_GRPCPP gRPC::grpc++)
+    if (CMAKE_CROSSCOMPILING)
+        find_program(_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)
+    else ()
+        set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
+    endif ()
+endif()
+
 set(GRPC_LIBRARIES ${_REFLECTION} ${_GRPC_GRPCPP} ${_PROTOBUF_LIBPROTOBUF})
+
+# Handle Folly in Nix environment  
+if (DEFINED ENV{IN_NIX_SHELL})
+    # In Nix environment, use pkg-config and create aliases
+    message(STATUS "Using Nix-provided Folly")
+    find_package(PkgConfig REQUIRED)
+    
+    # Ensure glog is found first (folly depends on it)
+    find_package(glog CONFIG REQUIRED)
+    
+    # Try to find folly with pkg-config first
+    pkg_check_modules(FOLLY_PKG QUIET folly)
+    
+    # Find the Folly CMake config (Nix provides Folly::folly)
+    find_package(Folly CONFIG QUIET)
+    
+    if(Folly_FOUND)
+        # Create lowercase aliases for NebulaStream compatibility
+        if(TARGET Folly::folly AND NOT TARGET folly::folly)
+            add_library(folly::folly ALIAS Folly::folly)
+            message(STATUS "Created alias folly::folly -> Folly::folly")
+        endif()
+        
+        if(TARGET Folly::folly_deps AND NOT TARGET folly::folly_deps)
+            add_library(folly::folly_deps ALIAS Folly::folly_deps)
+            message(STATUS "Created alias folly::folly_deps -> Folly::folly_deps")
+        endif()
+        
+        if(TARGET Folly::folly_test_util AND NOT TARGET folly::folly_test_util)
+            add_library(folly::folly_test_util ALIAS Folly::folly_test_util)
+            message(STATUS "Created alias folly::folly_test_util -> Folly::folly_test_util")
+        endif()
+        
+        if(TARGET Folly::follybenchmark AND NOT TARGET folly::follybenchmark)
+            add_library(folly::follybenchmark ALIAS Folly::follybenchmark)
+            message(STATUS "Created alias folly::follybenchmark -> Folly::follybenchmark")
+        endif()
+        
+        message(STATUS "Folly aliases created for Nix compatibility")
+    else()
+        message(STATUS "Warning: Folly not found in Nix environment")
+    endif()
+endif()
 
 # Library containing dlopen and dlcose.
 set(LIBRARIES ${LIBRARIES} ${CMAKE_DL_LIBS})

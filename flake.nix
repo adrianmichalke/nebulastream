@@ -113,6 +113,9 @@
             # Add our custom libcuckoo
             libcuckoo
             
+            # Add replxx for nes-nebuli
+            replxx
+            
             # Add our local nautilus build
             nautilusPackage
         ];
