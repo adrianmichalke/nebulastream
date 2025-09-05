@@ -44,6 +44,8 @@
 #include <EngineLogger.hpp>
 #include <ErrorHandling.hpp>
 #include <ExecutablePipelineStage.hpp>
+#include <Pipelines/CompiledExecutablePipelineStage.hpp>
+#include <OperatorHandlersSnapshotRegistry.hpp>
 #include <ExecutableQueryPlan.hpp>
 #include <Interfaces.hpp>
 #include <PipelineExecutionContext.hpp>
@@ -114,6 +116,9 @@ public:
         WorkEmitter& emitter);
     QueryId registerQuery(std::unique_ptr<ExecutableQueryPlan>);
     void stopQuery(QueryId queryId);
+
+
+    
 
     void clear()
     {
@@ -431,8 +436,8 @@ private:
     std::shared_ptr<AbstractBufferProvider> bufferProvider;
     std::atomic<TaskId::Underlying> taskIdCounter;
 
-    detail::Queue admissionQueue;
-    detail::Queue internalTaskQueue;
+    NES::detail::Queue admissionQueue;
+    NES::detail::Queue internalTaskQueue;
 
     /// Class Invariant: numberOfThreads == pool.size().
     /// We don't want to expose the vector directly to anyone, as this would introduce a race condition.
@@ -522,6 +527,19 @@ bool ThreadPool::WorkerThread::operator()(const StartPipelineTask& startPipeline
                 return false;
             });
         pipeline->stage->start(pec);
+        // After successful start, expose operator handlers for snapshotting
+        if (auto* compiled = dynamic_cast<CompiledExecutablePipelineStage*>(pipeline->stage.get()))
+        {
+            std::vector<OperatorHandlersSnapshotRegistry::Entry> entries;
+            for (const auto& kv : compiled->getOperatorHandlers())
+            {
+                entries.emplace_back(kv.first, kv.second);
+            }
+            NES_INFO("Registering {} operator handlers for query {} at pipeline {}", entries.size(), startPipeline.queryId, pipeline->id);
+            OperatorHandlersSnapshotRegistry::add(startPipeline.queryId, entries);
+            auto verify = OperatorHandlersSnapshotRegistry::get(startPipeline.queryId);
+            NES_INFO("Registry now has {} handlers for query {}", verify.size(), startPipeline.queryId);
+        }
         pool.statistic->onEvent(PipelineStart{WorkerThread::id, startPipeline.queryId, pipeline->id});
         return true;
     }
@@ -756,6 +774,20 @@ QueryEngine::~QueryEngine()
 {
     ThreadPool::WorkerThread::id = ThreadPool::terminatorThreadId;
     queryCatalog->clear();
+}
+
+
+std::vector<QueryEngine::OperatorHandlerSnapshot> QueryEngine::snapshotOperatorHandlers(QueryId queryId) const
+{
+    std::vector<OperatorHandlerSnapshot> out;
+    auto entries = OperatorHandlersSnapshotRegistry::get(queryId);
+    NES_INFO("snapshotOperatorHandlers: query {} has {} registered handlers", queryId, entries.size());
+    out.reserve(entries.size());
+    for (auto& e : entries)
+    {
+        out.push_back(OperatorHandlerSnapshot{e.first, e.second});
+    }
+    return out;
 }
 
 void QueryCatalog::start(

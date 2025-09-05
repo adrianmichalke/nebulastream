@@ -12,7 +12,6 @@
     limitations under the License.
 */
 #include <utility>
-#include <Execution/Pipelines/CompilationPipelineProvider.hpp>
 #include <Execution/Pipelines/CompiledExecutablePipelineStage.hpp>
 #include <Execution/Pipelines/ExecutablePipelineProviderRegistry.hpp>
 #include <Execution/Pipelines/RuntimeTracingPipelineProvider.hpp>

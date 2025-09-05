@@ -76,11 +76,23 @@ public:
            StreamJoinStrategy::OPTIMIZER_CHOOSES,
            "Join Strategy"
            "[NESTED_LOOP_JOIN|HASH_JOIN|OPTIMIZER_CHOOSES]."};
+           
+    /// Enable serializable aggregation for checkpointing support
+    BoolOption enableSerializableAggregation
+        = {"enable_serializable_aggregation",
+           "false",
+           "Enable serializable aggregation handler for checkpointing support"};
+
+    // Enable serializable vectors for Hash Join (stores values as SerializablePagedVector)
+    BoolOption enableSerializableJoin
+        = {"enable_serializable_join",
+           "false",
+           "Enable serializable value vectors for Hash Join (SerializablePagedVector)"};
 
 private:
     std::vector<BaseOption*> getOptions() override
     {
-        return {&executionMode, &pageSize, &numberOfPartitions, &joinStrategy, &numberOfRecordsPerKey, &operatorBufferSize};
+        return {&executionMode, &pageSize, &numberOfPartitions, &joinStrategy, &numberOfRecordsPerKey, &operatorBufferSize, &enableSerializableAggregation, &enableSerializableJoin};
     }
 };
 

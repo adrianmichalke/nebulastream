@@ -54,6 +54,9 @@ public:
     /// been called.
     void stopQuery(QueryId queryId, QueryTerminationType terminationType);
 
+    // Best-effort operator handler snapshot for a running query
+    [[nodiscard]] std::vector<QueryEngine::OperatorHandlerSnapshot> snapshotOperatorHandlers(QueryId queryId) const;
+
     [[nodiscard]] std::shared_ptr<BufferManager> getBufferManager() { return bufferManager; }
 
     [[nodiscard]] std::shared_ptr<QueryLog> getQueryLog() { return queryLog; }

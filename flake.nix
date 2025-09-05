@@ -55,6 +55,60 @@
           '';
         };
         
+        # Custom reflect-cpp derivation - with compiled Cap'n Proto support
+        reflect-cpp = pkgs.stdenv.mkDerivation rec {
+          pname = "reflect-cpp";
+          version = "0.20.0";
+          
+          src = pkgs.fetchFromGitHub {
+            owner = "getml";
+            repo = "reflect-cpp";
+            rev = "v${version}";
+            sha256 = "sha256-ZIGKxGtarPVx81NHNKdMpGns7b7/6ygiziEP7XgyNaM=";
+          };
+          
+          nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
+          buildInputs = [ pkgs.capnproto ];
+          
+          cmakeFlags = [
+            "-DREFLECTCPP_BUILD_SHARED=OFF"
+            "-DREFLECTCPP_CAPNPROTO=ON" 
+            "-DREFLECTCPP_BUILD_TESTS=OFF"
+            "-DREFLECTCPP_USE_VCPKG=OFF"
+            "-DREFLECTCPP_USE_BUNDLED_DEPENDENCIES=ON"
+            "-DREFLECTCPP_INSTALL=ON"
+          ];
+          
+          buildPhase = ''
+            runHook preBuild
+            make -j$NIX_BUILD_CORES
+            runHook postBuild
+          '';
+          
+          installPhase = ''
+            runHook preInstall
+            make install
+            
+            # Update CMake config to ensure Cap'n Proto is linked properly
+            # Update CMake config to point to the built library and link Cap'n Proto
+            if [[ -f "$out/lib/cmake/reflectcpp/reflectcppConfig.cmake" ]]; then
+              echo "# Additional Cap'n Proto linking" >> "$out/lib/cmake/reflectcpp/reflectcppConfig.cmake"
+              cat >> "$out/lib/cmake/reflectcpp/reflectcppConfig.cmake" << 'EOF'
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+              pkg_check_modules(CAPNP capnp)
+              if(CAPNP_FOUND)
+                target_link_libraries(reflectcpp INTERFACE ''${CAPNP_LIBRARIES})
+                target_include_directories(reflectcpp INTERFACE ''${CAPNP_INCLUDE_DIRS})
+              endif()
+            endif()
+            EOF
+            fi
+            
+            runHook postInstall
+          '';
+        };
+        
         
         # Build spdlog with fmt_11 for compatibility  
         spdlogWithFmt11 = pkgs.spdlog.overrideAttrs (oldAttrs: {
@@ -112,6 +166,10 @@
             
             # Add our custom libcuckoo
             libcuckoo
+            
+            # Add reflect-cpp and Cap'n Proto for serialization
+            reflect-cpp
+            capnproto
             
             # Add replxx for nes-nebuli
             replxx
@@ -209,6 +267,8 @@
             double-conversion
             libevent
             icu
+            gtest
+            capnproto
             nautilusPackage
         ] ++ (with llvmPackages_19; [
             llvm
@@ -240,6 +300,8 @@
             antlr4.runtime.cpp
             argparse
             libcuckoo
+            reflect-cpp
+            capnproto
             llvmPackages_19.libcxx
         ] + ":" + lib.makeSearchPath "" [
             "${llvmPackages_19.clang}"
@@ -259,6 +321,7 @@
             openssl
             zlib
             protobuf
+            capnproto
         ];
       };
   };

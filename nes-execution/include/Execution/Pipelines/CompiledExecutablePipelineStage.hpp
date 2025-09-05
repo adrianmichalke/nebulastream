@@ -13,7 +13,9 @@
 */
 #pragma once
 #include <future>
-#include <Runtime/Execution/ExecutablePipelineStage.hpp>
+#include <ExecutablePipelineStage.hpp>
+#include <Runtime/ExecutionResult.hpp>
+#include <Runtime/TupleBuffer.hpp>
 #include <Util/Timer.hpp>
 #include <nautilus/Engine.hpp>
 namespace NES
@@ -40,20 +42,19 @@ class CompiledExecutablePipelineStage : public ExecutablePipelineStage
 public:
     CompiledExecutablePipelineStage(
         const std::shared_ptr<PhysicalOperatorPipeline>& physicalOperatorPipeline, nautilus::engine::Options options);
-    uint32_t setup(PipelineExecutionContext& pipelineExecutionContext) override;
-    ExecutionResult execute(
-        Memory::TupleBuffer& inputTupleBuffer, PipelineExecutionContext& pipelineExecutionContext, WorkerContext& workerContext) override;
-    uint32_t stop(PipelineExecutionContext& pipelineExecutionContext) override;
+    void start(PipelineExecutionContext& pipelineExecutionContext) override;
+    void execute(const TupleBuffer& inputTupleBuffer, PipelineExecutionContext& pipelineExecutionContext) override;
+    void stop(PipelineExecutionContext& pipelineExecutionContext) override;
 
 protected:
-    [[nodiscard]] virtual nautilus::engine::CallableFunction<void, WorkerContext*, PipelineExecutionContext*, Memory::TupleBuffer*>
+    [[nodiscard]] virtual nautilus::engine::CallableFunction<void, PipelineExecutionContext*, const TupleBuffer*, const Arena*>
     compilePipeline() const;
     
     const nautilus::engine::Options options;
     std::shared_ptr<PhysicalOperatorPipeline> physicalOperatorPipeline;
 
 private:
-    nautilus::engine::CallableFunction<void, WorkerContext*, PipelineExecutionContext*, Memory::TupleBuffer*> pipelineFunctionCompiled;
+    nautilus::engine::CallableFunction<void, PipelineExecutionContext*, const TupleBuffer*, const Arena*> pipelineFunctionCompiled;
 };
 
 }

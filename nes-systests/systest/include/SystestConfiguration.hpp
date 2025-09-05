@@ -64,6 +64,12 @@ connections.  Valid values include dns:///localhost:1234,
 192.168.1.1:31416, dns:///[::1]:27182, etc.)"};
     BoolOption endlessMode = {"query_compiler_config", "false", "continuously issue queries to the worker"};
 
+    // Checkpoint testing options
+    BoolOption checkpointMode = {"checkpoint_mode", "false", "enable checkpoint testing mode"};
+    UIntOption checkpointAfterMs = {"checkpoint_after_ms", "50", "milliseconds after start to take checkpoint"};
+    StringOption checkpointDir = {"checkpoint_dir", PATH_TO_BINARY_DIR "/nes-systests/checkpoints", "checkpoint directory"};
+    BoolOption checkpointCompareBaseline = {"checkpoint_compare_baseline", "false", "run baseline and compare results"};
+
     std::optional<SingleNodeWorkerConfiguration> singleNodeWorkerConfig;
 
 protected:

@@ -20,6 +20,9 @@ get_source(nes-nautilus NES_NAUTILUS_SOURCE_FILES)
 add_library(nes-nautilus ${NES_NAUTILUS_SOURCE_FILES})
 target_link_libraries(nes-nautilus PUBLIC nes-memory)
 
+# Set C++20 standard for reflect-cpp
+target_compile_features(nes-nautilus PUBLIC cxx_std_20)
+
 
 if (NES_ENABLE_PRECOMPILED_HEADERS)
     target_precompile_headers(nes-nautilus REUSE_FROM nes-common)
@@ -102,6 +105,23 @@ target_include_directories(nes-nautilus PUBLIC
         $<INSTALL_INTERFACE:include/nebulastream/>
 )
 
+# Add reflect-cpp for automatic serialization (prefer Nix package over FetchContent)
+if(DEFINED ENV{NIX_BUILD_TOP})
+    # Using Nix environment - find the package
+    find_package(reflectcpp REQUIRED)
+    find_package(CapnProto REQUIRED)
+else()
+    # Fallback to FetchContent for non-Nix builds
+    include(FetchContent)
+    FetchContent_Declare(
+        reflect-cpp
+        GIT_REPOSITORY https://github.com/getml/reflect-cpp.git
+        GIT_TAG v0.20.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(reflect-cpp)
+endif()
+
 # Link with the nautilus library
 find_package(spdlog REQUIRED CONFIG)
 find_package(MLIR REQUIRED CONFIG)
@@ -139,15 +159,30 @@ endif()
 find_package(nautilus REQUIRED CONFIG)
 
 # We have to set the nes-nautilus to public to use the nautilus library in other modules
-target_link_libraries(nes-nautilus PUBLIC nautilus::nautilus
-        MLIRExecutionEngine
-        MLIRFuncAllExtensions
+if(DEFINED ENV{NIX_BUILD_TOP})
+    target_link_libraries(nes-nautilus PUBLIC nautilus::nautilus
+            reflectcpp::reflectcpp
+            CapnProto::capnp
+            MLIRExecutionEngine
+            MLIRFuncAllExtensions
 
-        # Dialects
-        MLIRSCFDialect
-        MLIRFuncToLLVM
-        MLIRSCFToControlFlow
-)
+            # Dialects
+            MLIRSCFDialect
+            MLIRFuncToLLVM
+            MLIRSCFToControlFlow
+    )
+else()
+    target_link_libraries(nes-nautilus PUBLIC nautilus::nautilus
+            reflectcpp::reflectcpp
+            MLIRExecutionEngine
+            MLIRFuncAllExtensions
+
+            # Dialects
+            MLIRSCFDialect
+            MLIRFuncToLLVM
+            MLIRSCFToControlFlow
+    )
+endif()
 
 # Add nautilus include subdirectory for compatibility - using Nix-provided nautilus
 # This allows includes like <val.hpp> to work instead of requiring <nautilus/val.hpp>

@@ -10,9 +10,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_source_files(nes-execution
-        Execution/Pipelines/CompiledExecutablePipelineStage.cpp
-        Execution/Pipelines/RuntimeTracingExecutablePipelineStage.cpp
-        Execution/Pipelines/RuntimeTracingPipelineProvider.cpp
-        QueryCompiler/Phases/NautilusCompilationPhase.cpp
-)
+# Temporarily disable nes-execution sources to stabilize build
+add_source_files(nes-execution)

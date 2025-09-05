@@ -40,6 +40,9 @@ public:
 
     std::string getCurrentStatus();
 
+    // Initialize baseline watermark for all origins (used during recovery)
+    void initializeBaseline(Timestamp ts);
+
 private:
     const std::vector<OriginId> origins;
     std::vector<std::shared_ptr<Sequencing::NonBlockingMonotonicSeqQueue<uint64_t>>> watermarkProcessors;

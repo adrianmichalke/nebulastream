@@ -331,4 +331,78 @@ runQueriesAtRemoteWorker(const std::vector<SystestQuery>& queries, const uint64_
     return runQueries(queries, numConcurrentQueries, submitter, discardPerformanceMessage);
 }
 
+std::vector<RunningQuery> runQueriesAtLocalWorkerWithCheckpoint(
+    const std::vector<SystestQuery>& queries,
+    const uint64_t /*numConcurrentQueriesIgnored*/,
+    const SingleNodeWorkerConfiguration& configuration,
+    const SystestConfiguration& config)
+{
+    // Sequential execution with checkpoint simulation
+    auto embeddedQueryManager = std::make_unique<EmbeddedWorkerQueryManager>(configuration);
+    QuerySubmitter submitter(std::move(embeddedQueryManager));
+
+    std::vector<RunningQuery> failed;
+    std::filesystem::create_directories(config.checkpointDir.getValue());
+
+    for (const auto& q : queries)
+    {
+        if (!q.planInfoOrException.has_value()) {
+            failed.push_back(RunningQuery{q, INVALID_QUERY_ID, {}, {}, {}, false, std::nullopt});
+            failed.back().passed = false;
+            failed.back().exception = q.planInfoOrException.error();
+            continue;
+        }
+        // Register
+        auto reg = submitter.registerQuery(q.planInfoOrException.value().queryPlan);
+        if (!reg) {
+            failed.push_back(RunningQuery{q, INVALID_QUERY_ID, {}, {}, {}, false, std::nullopt});
+            failed.back().passed = false;
+            failed.back().exception = reg.error();
+            continue;
+        }
+        auto qid = *reg;
+        submitter.startQuery(qid);
+        // Sleep for checkpointAfterMs
+        std::this_thread::sleep_for(std::chrono::milliseconds(config.checkpointAfterMs.getValue()));
+        // Export checkpoint
+        const auto cpPath = (std::filesystem::path(config.checkpointDir.getValue()) / (q.testName + "_" + std::to_string(qid.getRawValue()) + ".cp")).string();
+        auto cp = submitter.checkpoint(qid, cpPath);
+        if (!cp) {
+            auto rq = RunningQuery{q, qid, {}, {}, {}, false, std::nullopt};
+            rq.passed = false;
+            rq.exception = cp.error();
+            failed.push_back(rq);
+            submitter.stopQuery(qid);
+            submitter.unregisterQuery(qid);
+            continue;
+        }
+        // Stop and unregister original
+        submitter.stopQuery(qid);
+        submitter.unregisterQuery(qid);
+
+        // Recover and run restored query
+        auto rqidRes = submitter.recover(cpPath);
+        if (!rqidRes) {
+            auto rq = RunningQuery{q, INVALID_QUERY_ID, {}, {}, {}, false, std::nullopt};
+            rq.passed = false;
+            rq.exception = rqidRes.error();
+            failed.push_back(rq);
+            continue;
+        }
+        auto rqid = *rqidRes;
+        submitter.startQuery(rqid);
+        auto summary = submitter.waitForQueryTermination(rqid);
+        submitter.unregisterQuery(rqid);
+
+        auto rq = RunningQuery{q, rqid, summary, {}, {}, false, std::nullopt};
+        // Reuse existing result checkers
+        if (auto err = checkResult(rq)) {
+            rq.passed = false;
+            rq.exception = TestException(*err);
+            failed.push_back(rq);
+        }
+    }
+    return failed;
+}
+
 }
