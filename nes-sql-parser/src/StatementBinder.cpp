@@ -55,6 +55,9 @@
 #include <Sources/LogicalSource.hpp>
 #include <Sources/SourceCatalog.hpp>
 #include <ErrorHandling.hpp>
+#include <DataTypes/DataTypeProvider.hpp>
+#include <DataTypes/DataType.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
 
 namespace NES
 {
@@ -573,7 +576,86 @@ public:
     {
         if (statementAST->query() != nullptr)
         {
-            return queryBinder(statementAST->query());
+            // Build plan from parser
+            auto plan = queryBinder(statementAST->query());
+            // Inline registration: detect TIME_TRAVEL_READ sources and register a BinaryStore physical source
+            auto sources = getOperatorByType<SourceNameLogicalOperator>(plan);
+            for (const auto& src : sources)
+            {
+                const auto name = src.getLogicalSourceName();
+                constexpr std::string_view prefix = "__BINREAD__:";
+                if (name.rfind(prefix, 0) == 0)
+                {
+                    // name format: __BINREAD__:<path>[?k=v&...]
+                    const auto rest = name.substr(prefix.size());
+                    auto posq = rest.find('?');
+                    const auto filePath = rest.substr(0, posq);
+                    std::unordered_map<std::string, std::string> inlineOpts;
+                    if (posq != std::string::npos)
+                    {
+                        const auto q = rest.substr(posq + 1);
+                        size_t start = 0;
+                        while (start < q.size())
+                        {
+                            auto amp = q.find('&', start);
+                            auto token = q.substr(start, amp == std::string::npos ? std::string::npos : amp - start);
+                            auto eq = token.find('=');
+                            if (eq != std::string::npos)
+                            {
+                                inlineOpts.emplace(token.substr(0, eq), token.substr(eq + 1));
+                            }
+                            else if (!token.empty())
+                            {
+                                inlineOpts.emplace(token, "true");
+                            }
+                            if (amp == std::string::npos) break;
+                            start = amp + 1;
+                        }
+                    }
+                    // Build schema from inline option SCHEMA if provided: e.g., "UINT64 id UINT64 value UINT64 timestamp"
+                    Schema s{Schema::MemoryLayoutType::ROW_LAYOUT};
+                    if (auto it = inlineOpts.find("SCHEMA"); it != inlineOpts.end())
+                    {
+                        std::stringstream ss(it->second);
+                        std::vector<std::string> toks;
+                        std::string tok;
+                        while (ss >> tok) toks.push_back(tok);
+                        if (toks.size() % 2 != 0)
+                        {
+                            throw InvalidConfigParameter("SCHEMA must be specified as pairs of TYPE NAME, got: {}", it->second);
+                        }
+                        for (size_t i = 0; i < toks.size(); i += 2)
+                        {
+                            auto typeStr = toks[i];
+                            auto nameStr = toks[i + 1];
+                            auto type = DataTypeProvider::tryProvideDataType(typeStr);
+                            if (!type.has_value())
+                            {
+                                throw InvalidConfigParameter("Unknown data type '{}' in SCHEMA", typeStr);
+                            }
+                            s.addField(nameStr, *type);
+                        }
+                    }
+                    auto logicalOpt = const_cast<SourceCatalog*>(sourceCatalog.get())->addLogicalSource(name, s);
+                    if (!logicalOpt)
+                    {
+                        // logical source may already exist; continue
+                        logicalOpt = const_cast<SourceCatalog*>(sourceCatalog.get())->getLogicalSource(name);
+                    }
+                    if (logicalOpt)
+                    {
+                        // Build physical source descriptor for BinaryStore type
+                        std::unordered_map<std::string, std::string> cfg = inlineOpts;
+                        cfg.emplace("file_path", std::string(filePath));
+                        ParserConfig parserCfg{}; // Use native formatter for binary row data
+                        parserCfg.parserType = "Native";
+                        auto phys = const_cast<SourceCatalog*>(sourceCatalog.get())
+                                        ->addPhysicalSource(*logicalOpt, std::string("BinaryStore"), std::move(cfg), parserCfg);
+                        (void)phys;
+                    }
+                }
+            }
+            return plan;
         }
         try
         {

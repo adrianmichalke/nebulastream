@@ -18,6 +18,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
+#include <thread>
+#include <chrono>
 #include <iterator>
 #include <optional>
 #include <ostream>
@@ -275,7 +278,27 @@ std::optional<QueryResult> loadQueryResult(const NES::Systest::SystestQuery& que
     std::ifstream resultFile(query.resultFile());
     if (!resultFile)
     {
-        throw NES::UnknownException("Failed to open result file: {}", query.resultFile());
+        // Wait briefly for the sink to materialize the result file
+        const auto path = std::filesystem::path(query.resultFile());
+        const auto start = std::chrono::steady_clock::now();
+        const auto timeout = std::chrono::milliseconds(3000);
+        const auto step = std::chrono::milliseconds(50);
+        while (std::chrono::steady_clock::now() - start < timeout)
+        {
+            std::this_thread::sleep_for(step);
+            if (std::filesystem::exists(path))
+            {
+                resultFile.open(query.resultFile());
+                if (resultFile)
+                {
+                    break;
+                }
+            }
+        }
+        if (!resultFile)
+        {
+            throw NES::UnknownException("Failed to open result file: {}", query.resultFile());
+        }
     }
 
     QueryResult result;

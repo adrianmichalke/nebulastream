@@ -62,11 +62,54 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
     /// Convert logical source descriptor to actual source descriptor
     const auto sourceOperator = pipeline->getRootOperator().get<SourcePhysicalOperator>();
 
+    auto desc = sourceOperator.getDescriptor();
+    auto parserCfg = desc.getParserConfig();
+    if ((desc.getSourceType() == "BinaryStore") && (parserCfg.parserType.empty()))
+    {
+        parserCfg.parserType = "Native";
+    }
+    // Do not bypass the InputFormatter for now; the Native formatter will schedule with NEVER to avoid duplicates
+
     const std::vector<std::shared_ptr<ExecutablePipeline>> executableSuccessorPipelines;
-    auto inputFormatterTaskPipeline = provideInputFormatterTask(
-        sourceOperator.getOriginId(),
-        *sourceOperator.getDescriptor().getLogicalSource().getSchema(),
-        sourceOperator.getDescriptor().getParserConfig());
+    NES_DEBUG(
+        "LowerToCompiledQueryPlanPhase: Source originId={} type={} parserType={}",
+        desc.getPhysicalSourceId().getRawValue(),
+        desc.getSourceType(),
+        parserCfg.parserType);
+    // Stable bypass: for BinaryStore in INTERPRETER mode, skip InputFormatter and attach source directly to operator pipelines.
+    const bool isBinaryStore = (desc.getSourceType() == std::string("BinaryStore"));
+    const bool isInterpreter = (pipelineQueryPlan->getExecutionMode() == ExecutionMode::INTERPRETER);
+    if (isBinaryStore && isInterpreter)
+    {
+        std::vector<std::weak_ptr<ExecutablePipeline>> firstStages;
+        const Predecessor predecessor = sourceOperator.getOriginId();
+        for (const auto& successor : pipeline->getSuccessors())
+        {
+            if (successor->isSinkPipeline())
+            {
+                // Register sink with the source as predecessor (OriginId)
+                processSuccessor(predecessor, successor);
+            }
+            else
+            {
+                // Build operator pipeline starting after source and collect as a first-stage successor
+                if (auto exec = processOperatorPipeline(successor))
+                {
+                    firstStages.emplace_back(exec);
+                }
+            }
+        }
+
+        // Remove the logical source pipeline from the plan (we directly connect source to its successors)
+        pipelineQueryPlan->removePipeline(*pipeline);
+
+        // Register the source with its first executable operator stages; sinks registered above will be linked at instantiation
+        sources.emplace_back(sourceOperator.getOriginId(), desc, std::move(firstStages));
+        return;
+    }
+
+    auto inputFormatterTaskPipeline
+        = provideInputFormatterTask(sourceOperator.getOriginId(), *desc.getLogicalSource().getSchema(), parserCfg);
 
     auto executableInputFormatterPipeline
         = ExecutablePipeline::create(pipeline->getPipelineId(), std::move(inputFormatterTaskPipeline), executableSuccessorPipelines);
@@ -87,7 +130,7 @@ void LowerToCompiledQueryPlanPhase::processSource(const std::shared_ptr<Pipeline
     pipelineToExecutableMap.emplace(getNextPipelineId(), executableInputFormatterPipeline);
     inputFormatterTasks.emplace_back(executableInputFormatterPipeline);
 
-    sources.emplace_back(sourceOperator.getOriginId(), sourceOperator.getDescriptor(), std::move(inputFormatterTasks));
+    sources.emplace_back(sourceOperator.getOriginId(), desc, std::move(inputFormatterTasks));
 }
 
 void LowerToCompiledQueryPlanPhase::processSink(const Predecessor& predecessor, const std::shared_ptr<Pipeline>& pipeline)

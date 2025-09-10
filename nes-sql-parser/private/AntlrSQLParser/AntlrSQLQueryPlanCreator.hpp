@@ -77,6 +77,8 @@ public:
     void exitLogicalNot(AntlrSQLParser::LogicalNotContext* context) override;
     void exitConstantDefault(AntlrSQLParser::ConstantDefaultContext* context) override;
     void exitThresholdMinSizeParameter(AntlrSQLParser::ThresholdMinSizeParameterContext* context) override;
+    void enterTimeTravelClause(AntlrSQLParser::TimeTravelClauseContext* context) override;
+    void enterFunctionTable(AntlrSQLParser::FunctionTableContext* context) override;
 };
 
 }

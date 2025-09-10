@@ -21,6 +21,7 @@
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Sources/SourceDescriptor.hpp>
 #include <Sources/SourceHandle.hpp>
+#include <Sources/BinaryStoreSource.hpp>
 #include <ErrorHandling.hpp>
 #include <SourceRegistry.hpp>
 
@@ -42,6 +43,22 @@ std::unique_ptr<SourceHandle> SourceProvider::lower(
         auto numberOfBuffersInLocalPool = (sourceDescriptor.getFromConfig(SourceDescriptor::NUMBER_OF_BUFFERS_IN_LOCAL_POOL) > 0)
             ? sourceDescriptor.getFromConfig(SourceDescriptor::NUMBER_OF_BUFFERS_IN_LOCAL_POOL)
             : defaultNumberOfBuffersInLocalPool;
+        NES_DEBUG(
+            "SourceProvider: lowering source type={} originId={} parserType={}",
+            sourceDescriptor.getSourceType(),
+            originId.getRawValue(),
+            sourceDescriptor.getParserConfig().parserType);
+        // Extra debug: verify instantiated source type for BinaryStore
+        if (sourceDescriptor.getSourceType() == "BinaryStore")
+        {
+            auto* bs = dynamic_cast<BinaryStoreSource*>(source.value().get());
+            NES_DEBUG("SourceProvider: created BinaryStoreSource instance? {}", bs ? "yes" : "no");
+            if (!bs)
+            {
+                throw UnknownSourceType(
+                    "Expected BinaryStoreSource instance for BinaryStore type, but got a different implementation");
+            }
+        }
         return std::make_unique<SourceHandle>(
             std::move(originId), std::move(bufferPool), numberOfBuffersInLocalPool, std::move(source.value()));
     }

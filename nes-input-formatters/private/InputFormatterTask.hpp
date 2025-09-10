@@ -239,7 +239,8 @@ public:
         const auto numberOfTuplesInFormattedBuffer = rawBuffer.getNumberOfBytes() / this->schemaInfo.getSizeOfTupleInBytes();
         rawBuffer.setNumberOfTuples(numberOfTuplesInFormattedBuffer);
         /// The 'rawBuffer' is already formatted, so we can use it without any formatting.
-        rawBuffer.emit(pec, PipelineExecutionContext::ContinuationPolicy::POSSIBLE);
+        /// For Native (already formatted) input, ensure single processing by scheduling as a new task (NEVER continue inline).
+        rawBuffer.emit(pec, PipelineExecutionContext::ContinuationPolicy::NEVER);
     }
 
     void executeTask(const RawTupleBuffer& rawBuffer, PipelineExecutionContext& pec)

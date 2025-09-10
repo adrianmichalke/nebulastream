@@ -30,6 +30,7 @@
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Runtime/TupleBuffer.hpp>
 #include <Sources/Source.hpp>
+#include <Sources/BinaryStoreSource.hpp>
 #include <Sources/SourceReturnType.hpp>
 #include <Time/Timestamp.hpp>
 #include <Util/Logger/Logger.hpp>
@@ -114,6 +115,7 @@ SourceImplementationTermination
 dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, AbstractBufferProvider& bufferProvider, const EmitFn& emit)
 {
     const SourceHandle sourceHandle(source);
+    NES_DEBUG("SourceThread: opened source impl: {}", source);
     while (!stopToken.stop_requested())
     {
         /// 4 Things that could happen:
@@ -126,11 +128,17 @@ dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, Abstra
         ///    The thread exists with an exception
         auto emptyBuffer = bufferProvider.getBufferBlocking();
         const auto numReadBytes = source.fillTupleBuffer(emptyBuffer, stopToken);
+        NES_DEBUG(
+            "SourceThread: source {} returned {} bytes (tb.tuples before emit={})",
+            source,
+            numReadBytes,
+            emptyBuffer.getNumberOfTuples());
 
         if (numReadBytes != 0)
         {
             /// The source read in raw bytes, thus we don't know the number of tuples yet.
             /// The InputFormatterTask expects that the source set the number of bytes this way and uses it to determine the number of tuples.
+            // Report raw bytes for downstream Native formatter to compute tuple counts
             emptyBuffer.setNumberOfTuples(numReadBytes);
             emit(emptyBuffer, true);
         }

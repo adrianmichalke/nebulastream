@@ -78,6 +78,9 @@ public:
 
     static LogicalPlan addSink(std::string sinkName, const LogicalPlan& queryPlan);
 
+    // Add Store operator as an inline intermediate operator with validated config
+    static LogicalPlan addStore(const DescriptorConfig::Config& config, const LogicalPlan& queryPlan);
+
     /// Checks in case a window is contained in the query.
     /// If a watermark operator exists in the queryPlan and if not adds a watermark strategy to the queryPlan.
     static LogicalPlan checkAndAddWatermarkAssigner(LogicalPlan queryPlan, const std::shared_ptr<Windowing::WindowType>& windowType);

@@ -19,6 +19,7 @@ get_source(nes-nautilus NES_NAUTILUS_SOURCE_FILES)
 # Add Library
 add_library(nes-nautilus ${NES_NAUTILUS_SOURCE_FILES})
 target_link_libraries(nes-nautilus PUBLIC nes-memory)
+target_include_directories(nes-nautilus PUBLIC ${CMAKE_SOURCE_DIR}/nes-runtime/include)
 
 # Set C++20 standard for reflect-cpp
 target_compile_features(nes-nautilus PUBLIC cxx_std_20)

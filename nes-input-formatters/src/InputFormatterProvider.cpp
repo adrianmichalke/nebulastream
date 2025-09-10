@@ -30,6 +30,7 @@ namespace NES
 std::unique_ptr<InputFormatterTaskPipeline>
 provideInputFormatterTask(const OriginId originId, const Schema& schema, const ParserConfig& config)
 {
+    NES_DEBUG("InputFormatterProvider: create for parserType={} originId={}", config.parserType, originId.getRawValue());
     if (auto inputFormatter
         = InputFormatIndexerRegistry::instance().create(config.parserType, InputFormatIndexerRegistryArguments(config, originId, schema)))
     {

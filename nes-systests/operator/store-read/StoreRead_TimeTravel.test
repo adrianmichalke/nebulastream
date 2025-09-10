@@ -1,0 +1,28 @@
+# name: operator/store-read/StoreRead_TimeTravel.test
+# description: Store stream to binary via TIME TRAVEL STORE and read back via TIME_TRAVEL_READ
+# groups: [Store, Read]
+
+Source stream UINT64 id UINT64 value UINT64 timestamp INLINE
+1,1,1000
+2,1,1001
+3,1,1002
+4,2,2000
+
+SINK sinkStore UINT64 stream$id UINT64 stream$value UINT64 stream$timestamp
+SINK sinkRead UINT64 id UINT64 value UINT64 timestamp
+
+# 1: store rows to binary file and also write to a sink for comparison
+SELECT id, value, timestamp FROM stream INTO sinkStore TIME TRAVEL STORE (FILE_PATH AS '/home/adrian/workspace/nebulastream-public/nes-systests/testdata/small/store_read_out.bin')
+----
+1,1,1000
+2,1,1001
+3,1,1002
+4,2,2000
+
+# 2: read them back via TIME_TRAVEL_READ and verify
+SELECT id, value, timestamp FROM TIME_TRAVEL_READ('/home/adrian/workspace/nebulastream-public/nes-systests/testdata/small/store_read_out.bin', 'SCHEMA=UINT64 id UINT64 value UINT64 timestamp') INTO sinkRead
+----
+1,1,1000
+2,1,1001
+3,1,1002
+4,2,2000

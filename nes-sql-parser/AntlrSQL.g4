@@ -115,7 +115,7 @@ queryPrimary
     | '(' query ')'                                                         #subquery
     ;
 /// new layout to be closer to traditional SQL
-querySpecification: selectClause fromClause whereClause? windowedAggregationClause? havingClause? sinkClause?;
+querySpecification: selectClause fromClause whereClause? windowedAggregationClause? havingClause? sinkClause? timeTravelClause?;
 
 
 fromClause: FROM relation (',' relation)*;
@@ -171,7 +171,11 @@ multipartIdentifier
     : parts+=errorCapturingIdentifier ('.' parts+=errorCapturingIdentifier)*
     ;
 
-namedConfigExpression: constant AS name=identifierChain;
+// Allow both orders: value AS KEY or KEY AS value
+namedConfigExpression
+    : constant AS name=identifierChain
+    | name=identifierChain AS constant
+    ;
 
 namedExpression
     : expression AS name=identifier
@@ -296,6 +300,9 @@ functionName:  IDENTIFIER | AVG | MAX | MIN | SUM | COUNT | MEDIAN;
 sinkClause: INTO sink (',' sink)*;
 
 sink: identifier;
+
+// Time travel clause to enable inline storing of records into a file with options
+timeTravelClause: TIME TRAVEL STORE '(' namedConfigExpressionSeq ')';
 
 nullNotnull
     : NOT? NULLTOKEN
@@ -479,6 +486,9 @@ AT_MOST_ONCE : 'AT_MOST_ONCE';
 AT_LEAST_ONCE : 'AT_LEAST_ONCE';
 JSON: 'JSON';
 TEXT: 'TEXT';
+TIME: 'TIME' | 'time';
+TRAVEL: 'TRAVEL' | 'travel';
+STORE: 'STORE' | 'store';
 ///--NebulaSQL-KEYWORD-LIST-END
 ///****************************
 /// End of the keywords list

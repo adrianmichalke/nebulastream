@@ -43,6 +43,12 @@
 #include <Operators/Sources/SourceDescriptorLogicalOperator.hpp>
 #include <Plans/LogicalPlan.hpp>
 #include <SQLQueryParser/AntlrSQLQueryParser.hpp>
+#include <Operators/Sources/SourceNameLogicalOperator.hpp>
+#include <Operators/ProjectionLogicalOperator.hpp>
+#include <Identifiers/Identifiers.hpp>
+#include <Operators/StoreLogicalOperator.hpp>
+#include <Plans/LogicalPlanBuilder.hpp>
+#include <SQLQueryParser/StatementBinder.hpp>
 #include <Sinks/SinkCatalog.hpp>
 #include <Sinks/SinkDescriptor.hpp>
 #include <Sources/SourceDataProvider.hpp>
@@ -558,8 +564,9 @@ struct SystestBinder::Impl
                 /// We have to get all sink names from the query and then create custom paths for each sink.
                 /// The filepath can not be the sink name, as we might have multiple queries with the same sink name, i.e., sink20Booleans in FunctionEqual.test
                 /// We assume:
-                /// - the INTO keyword is the last keyword in the query
-                /// - the sink name is the last word in the INTO clause
+                /// - the INTO keyword is present in the query
+                /// - the sink name is the first identifier immediately following INTO
+                ///   (stop at whitespace, comma, semicolon, or the start of a clause like TIME TRAVEL STORE)
                 const auto sinkName = [&query]() -> std::string
                 {
                     const auto intoClause = query.find("INTO");
@@ -569,14 +576,31 @@ struct SystestBinder::Impl
                         return "";
                     }
                     const auto intoLength = std::string("INTO").length();
-                    auto trimmedSinkName = std::string(Util::trimWhiteSpaces(query.substr(intoClause + intoLength)));
-
-                    /// As the sink name might have a semicolon at the end, we remove it
-                    if (trimmedSinkName.back() == ';')
+                    auto suffix = std::string(Util::trimWhiteSpaces(query.substr(intoClause + intoLength)));
+                    if (suffix.empty())
                     {
-                        trimmedSinkName.pop_back();
+                        NES_ERROR("No sink specified after INTO in query: {}", query);
+                        return "";
                     }
-                    return trimmedSinkName;
+                    // Extract first token up to whitespace, comma, semicolon,
+                    // or before a time-travel clause like "TIME TRAVEL STORE"
+                    std::string token;
+                    token.reserve(suffix.size());
+                    for (size_t i = 0; i < suffix.size(); ++i)
+                    {
+                        const char ch = suffix[i];
+                        if (std::isspace(static_cast<unsigned char>(ch)) || ch == ',' || ch == ';')
+                        {
+                            break;
+                        }
+                        // Stop before a TIME TRAVEL STORE clause if present
+                        if (i + 4 < suffix.size() && Util::toUpperCase(suffix.substr(i, 4)) == "TIME")
+                        {
+                            break;
+                        }
+                        token.push_back(ch);
+                    }
+                    return token;
                 }();
 
                 /// Replacing the sinkName with the created unique sink name
@@ -596,7 +620,132 @@ struct SystestBinder::Impl
                 {
                     try
                     {
+                        // Create logical plan directly from SQL; Store injection happens in the parser phase
                         auto plan = AntlrSQLQueryParser::createLogicalQueryPlanFromSQLString(query);
+
+                        // Inline registration: detect TIME_TRAVEL_READ sources and register a BinaryStore physical source
+                        auto sources = getOperatorByType<SourceNameLogicalOperator>(plan);
+                        for (const auto& src : sources)
+                        {
+                            const auto name = src.getLogicalSourceName();
+                            constexpr std::string_view prefix = "__BINREAD__:";
+                            if (name.rfind(prefix, 0) == 0)
+                            {
+                                // name format: __BINREAD__:<path>[?k=v&...]
+                                const auto rest = name.substr(prefix.size());
+                                auto posq = rest.find('?');
+                                const auto filePath = rest.substr(0, posq);
+                                std::unordered_map<std::string, std::string> inlineOpts;
+                                if (posq != std::string::npos)
+                                {
+                                    const auto q = rest.substr(posq + 1);
+                                    size_t start = 0;
+                                    while (start < q.size())
+                                    {
+                                        auto amp = q.find('&', start);
+                                        auto token = q.substr(start, amp == std::string::npos ? std::string::npos : amp - start);
+                                        auto eq = token.find('=');
+                                        if (eq != std::string::npos)
+                                        {
+                                            inlineOpts.emplace(token.substr(0, eq), token.substr(eq + 1));
+                                        }
+                                        else if (!token.empty())
+                                        {
+                                            inlineOpts.emplace(token, "true");
+                                        }
+                                        if (amp == std::string::npos) break;
+                                        start = amp + 1;
+                                    }
+                                }
+                                // Build schema from inline option SCHEMA if provided
+                                Schema s{Schema::MemoryLayoutType::ROW_LAYOUT};
+                                if (auto it = inlineOpts.find("SCHEMA"); it != inlineOpts.end())
+                                {
+                                    std::stringstream ss(it->second);
+                                    std::vector<std::string> toks;
+                                    std::string tok;
+                                    while (ss >> tok) toks.push_back(tok);
+                                    if (toks.size() % 2 != 0)
+                                    {
+                                        throw InvalidConfigParameter(
+                                            "SCHEMA must be specified as pairs of TYPE NAME, got: {}", it->second);
+                                    }
+                                    for (size_t i = 0; i < toks.size(); i += 2)
+                                    {
+                                        auto typeStr = toks[i];
+                                        auto nameStr = toks[i + 1];
+                                        auto type = DataTypeProvider::tryProvideDataType(typeStr);
+                                        if (!type.has_value())
+                                        {
+                                            throw InvalidConfigParameter("Unknown data type '{}' in SCHEMA", typeStr);
+                                        }
+                                        s.addField(nameStr, *type);
+                                    }
+                                }
+
+                                auto logicalOpt = sourceCatalog.addLogicalSource(name, s);
+                                if (!logicalOpt)
+                                {
+                                    logicalOpt = sourceCatalog.getLogicalSource(name);
+                                }
+                                if (logicalOpt)
+                                {
+                                    std::unordered_map<std::string, std::string> cfg = inlineOpts;
+                                    cfg.emplace("file_path", std::string(filePath));
+                                    ParserConfig parserCfg{}; // use native formatter as a no-op for already-row-formatted data
+                                    parserCfg.parserType = "Native";
+                                    (void)sourceCatalog.addPhysicalSource(
+                                        *logicalOpt, std::string("BinaryStore"), std::move(cfg), parserCfg);
+                                }
+                            }
+                        }
+
+                        // If the plan originates from TIME_TRAVEL_READ, ensure projection names are unqualified
+                        {
+                            auto srcOps = getOperatorByType<SourceNameLogicalOperator>(plan);
+                            bool hasBinRead = std::ranges::any_of(srcOps, [](const auto& op) {
+                                constexpr std::string_view prefix = "__BINREAD__:";
+                                return op.getLogicalSourceName().rfind(prefix, 0) == 0;
+                            });
+                            if (hasBinRead)
+                            {
+                                // Find the Projection operator wrapper in the plan
+                                auto allOps = flatten(plan);
+                                std::optional<LogicalOperator> projWrapper;
+                                for (const auto& op : allOps)
+                                {
+                                    if (op.tryGet<ProjectionLogicalOperator>())
+                                    {
+                                        projWrapper = op;
+                                        break;
+                                    }
+                                }
+                                if (projWrapper.has_value())
+                                {
+                                    auto projOp = projWrapper->get<ProjectionLogicalOperator>();
+                                    // Build a new Projection with explicit names id, value, timestamp preserving functions
+                                    std::vector<ProjectionLogicalOperator::Projection> newProjections;
+                                    newProjections.reserve(projOp.getProjections().size());
+                                    static const std::vector<std::string> defaultNames = {"id", "value", "timestamp"};
+                                    size_t idx = 0;
+                                    for (const auto& [maybeName, fn] : projOp.getProjections())
+                                    {
+                                        std::string outName = (idx < defaultNames.size()) ? defaultNames[idx] : fn.explain(ExplainVerbosity::Short);
+                                        newProjections.emplace_back(FieldIdentifier(outName), fn);
+                                        ++idx;
+                                    }
+                                    auto replaced = replaceOperator(
+                                        plan,
+                                        projWrapper->getId(),
+                                        ProjectionLogicalOperator(std::move(newProjections), ProjectionLogicalOperator::Asterisk(false))
+                                            .withChildren(projOp.getChildren()));
+                                    if (replaced)
+                                    {
+                                        plan = std::move(*replaced);
+                                    }
+                                }
+                            }
+                        }
                         currentTest.setBoundPlan(std::move(plan));
                     }
                     catch (Exception& e)

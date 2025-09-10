@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -65,6 +66,7 @@
 #include <fmt/ranges.h>
 #include <ErrorHandling.hpp>
 #include <ParserUtil.hpp>
+#include <Operators/StoreLogicalOperator.hpp>
 
 namespace NES::Parsers
 {
@@ -81,7 +83,9 @@ LogicalPlan AntlrSQLQueryPlanCreator::getQueryPlan() const
     }
     /// Todo #421: support multiple sinks
     INVARIANT(!sinkNames.empty(), "Need at least one sink!");
-    return LogicalPlanBuilder::addSink(sinkNames.front(), queryPlans.top());
+    auto plan = queryPlans.top();
+    // Note: Store operator injection happens in exitPrimaryQuery where helper context is available.
+    return LogicalPlanBuilder::addSink(sinkNames.front(), plan);
 }
 
 Windowing::TimeMeasure buildTimeMeasure(const int size, const uint64_t timebase)
@@ -360,7 +364,10 @@ void AntlrSQLQueryPlanCreator::enterIdentifier(AntlrSQLParser::IdentifierContext
     {
         helpers.top().functionBuilder.emplace_back(FieldAccessLogicalFunction(context->getText()));
     }
-    else if (helpers.top().isFrom and not helpers.top().isJoinRelation and AntlrSQLParser::RuleErrorCapturingIdentifier == parentRuleIndex)
+    else if (
+        helpers.top().isFrom && !helpers.top().isJoinRelation
+        && AntlrSQLParser::RuleErrorCapturingIdentifier == parentRuleIndex
+        && helpers.top().getSource().empty())
     {
         /// get main source name
         helpers.top().setSource(context->getText());
@@ -456,6 +463,18 @@ void AntlrSQLQueryPlanCreator::exitPrimaryQuery(AntlrSQLParser::PrimaryQueryCont
             queryPlan = LogicalPlanBuilder::addSelection(*havingExpr, queryPlan);
         }
     }
+    // Inject Store operator into the plan before sink if TIME TRAVEL STORE was provided
+    if (helpers.top().storeOptions.has_value())
+    {
+        // For TIME TRAVEL STORE, default to append=false (truncate) unless overridden
+        auto opts = *helpers.top().storeOptions;
+        if (!opts.contains("append"))
+        {
+            opts.emplace("append", "false");
+        }
+        auto cfg = StoreLogicalOperator::validateAndFormatConfig(std::move(opts));
+        queryPlan = LogicalPlanBuilder::addStore(cfg, queryPlan);
+    }
     helpers.pop();
     if (helpers.empty())
     {
@@ -500,6 +519,66 @@ void AntlrSQLQueryPlanCreator::enterTimeUnit(AntlrSQLParser::TimeUnitContext* co
     {
         helpers.top().timeUnit = timeunit;
     }
+}
+
+static std::string stripQuotes(const std::string& s)
+{
+    if (s.size() >= 2 && ((s.front() == '\'' && s.back() == '\'') || (s.front() == '"' && s.back() == '"')))
+    {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+void AntlrSQLQueryPlanCreator::enterFunctionTable(AntlrSQLParser::FunctionTableContext* context)
+{
+    // Handle TIME_TRAVEL_READ('<file>', ... ) as a table-valued function source shortcut
+    const auto funcName = Util::toUpperCase(context->funcName->getText());
+    if (funcName == "TIME_TRAVEL_READ")
+    {
+        // Parse first argument as file path string
+        if (context->expression().empty())
+        {
+            throw InvalidQuerySyntax("TIME_TRAVEL_READ requires at least one argument: file path");
+        }
+        const auto fileExprText = context->expression(0)->getText();
+        const auto filePath = stripQuotes(fileExprText);
+        // Collect optional key=value pairs from subsequent arguments (as strings 'KEY=VALUE')
+        std::vector<std::pair<std::string, std::string>> kvs;
+        for (size_t i = 1; i < context->expression().size(); ++i)
+        {
+            auto txt = stripQuotes(context->expression(i)->getText());
+            auto pos = txt.find('=');
+            if (pos != std::string::npos)
+            {
+                auto k = txt.substr(0, pos);
+                auto v = txt.substr(pos + 1);
+                kvs.emplace_back(std::move(k), std::move(v));
+            }
+            else
+            {
+                kvs.emplace_back(txt, std::string("true"));
+            }
+        }
+        // Create a synthetic source name encoding the file path and options for binder registration
+        std::string name = fmt::format("__BINREAD__:{}", filePath);
+        if (!kvs.empty())
+        {
+            name += "?";
+            bool first = true;
+            for (const auto& [k, v] : kvs)
+            {
+                if (!first) name += "&";
+                name += k;
+                name += "=";
+                name += v;
+                first = false;
+            }
+        }
+        helpers.top().setSource(name);
+        // Optionally we could stash options for future wiring
+    }
+    AntlrSQLBaseListener::enterFunctionTable(context);
 }
 
 void AntlrSQLQueryPlanCreator::exitSizeParameter(AntlrSQLParser::SizeParameterContext* context)
@@ -921,5 +1000,30 @@ void AntlrSQLQueryPlanCreator::exitGroupByClause(AntlrSQLParser::GroupByClauseCo
 {
     helpers.top().isGroupBy = false;
     AntlrSQLBaseListener::exitGroupByClause(context);
+}
+
+void AntlrSQLQueryPlanCreator::enterTimeTravelClause(AntlrSQLParser::TimeTravelClauseContext* context)
+{
+    // Parse namedConfigExpressionSeq into key/value strings
+    std::unordered_map<std::string, std::string> options;
+    auto* seq = context->namedConfigExpressionSeq();
+    if (seq)
+    {
+        for (auto* nce : seq->namedConfigExpression())
+        {
+            // Name
+            std::string key = Util::toLowerCase(nce->name->getText());
+            // Value
+            auto* c = nce->constant();
+            std::string value = c ? c->getText() : std::string();
+            // Strip quotes from strings
+            if (!value.empty() && (value.front() == '\'' || value.front() == '"') && value.size() >= 2)
+            {
+                value = value.substr(1, value.size() - 2);
+            }
+            options.emplace(key, value);
+        }
+    }
+    helpers.top().storeOptions = std::move(options);
 }
 }

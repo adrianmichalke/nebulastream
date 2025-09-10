@@ -73,7 +73,13 @@ std::shared_ptr<Pipeline> createNewPiplineWithScan(
     const auto newPipeline = std::make_shared<Pipeline>(ScanPhysicalOperator(memoryProvider, schema->getFieldNames()));
     prevPipeline->addSuccessor(newPipeline, prevPipeline);
     pipelineMap[wrappedOpAfterScan.getPhysicalOperator().getId()] = newPipeline;
+    // Append the operator and register its handler if present
     newPipeline->appendOperator(wrappedOpAfterScan.getPhysicalOperator());
+    if (wrappedOpAfterScan.getHandler() && wrappedOpAfterScan.getHandlerId())
+    {
+        newPipeline->getOperatorHandlers().emplace(
+            wrappedOpAfterScan.getHandlerId().value(), wrappedOpAfterScan.getHandler().value());
+    }
     return newPipeline;
 }
 
@@ -207,6 +213,10 @@ void buildPipelineRecursively(
             addDefaultEmit(currentPipeline, *opWrapper, configuredBufferSize);
         }
         const auto newPipeline = std::make_shared<Pipeline>(opWrapper->getPhysicalOperator());
+        if (opWrapper->getHandler() && opWrapper->getHandlerId())
+        {
+            newPipeline->getOperatorHandlers().emplace(opWrapper->getHandlerId().value(), opWrapper->getHandler().value());
+        }
         currentPipeline->addSuccessor(newPipeline, currentPipeline);
         const auto newPipelinePtr = currentPipeline->getSuccessors().back();
         pipelineMap[opId] = newPipelinePtr;

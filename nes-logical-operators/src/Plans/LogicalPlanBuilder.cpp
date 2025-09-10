@@ -32,6 +32,7 @@
 #include <Operators/IngestionTimeWatermarkAssignerLogicalOperator.hpp>
 #include <Operators/ProjectionLogicalOperator.hpp>
 #include <Operators/SelectionLogicalOperator.hpp>
+#include <Operators/StoreLogicalOperator.hpp>
 #include <Operators/Sinks/SinkLogicalOperator.hpp>
 #include <Operators/Sources/SourceNameLogicalOperator.hpp>
 #include <Operators/UnionLogicalOperator.hpp>
@@ -171,6 +172,14 @@ LogicalPlan LogicalPlanBuilder::addJoin(
 LogicalPlan LogicalPlanBuilder::addSink(std::string sinkName, const LogicalPlan& queryPlan)
 {
     return promoteOperatorToRoot(queryPlan, SinkLogicalOperator(std::move(sinkName)));
+}
+
+LogicalPlan LogicalPlanBuilder::addStore(const DescriptorConfig::Config& config, const LogicalPlan& queryPlan)
+{
+    // Validate and format config via StoreLogicalOperator
+    // Convert variant Config to string map for validation? StoreLogicalOperator accepts DescriptorConfig::Config directly.
+    auto storeOp = StoreLogicalOperator(config);
+    return promoteOperatorToRoot(queryPlan, storeOp);
 }
 
 LogicalPlan

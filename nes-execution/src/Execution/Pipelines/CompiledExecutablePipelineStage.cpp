@@ -53,8 +53,8 @@ CompiledExecutablePipelineStage::compilePipeline() const
     {
         auto ctx = ExecutionContext(pipelineExecutionContext, nautilus::val<const Arena*>{nullptr});
         RecordBuffer recordBuffer(recordBufferRef);
-        pipeline->getRootOperator().open(ctx, recordBuffer);
-        pipeline->getRootOperator().close(ctx, recordBuffer);
+        physicalOperatorPipeline->getRootOperator().open(ctx, recordBuffer);
+        physicalOperatorPipeline->getRootOperator().close(ctx, recordBuffer);
     };
 
     const nautilus::engine::NautilusEngine engine(options);
@@ -69,14 +69,14 @@ void CompiledExecutablePipelineStage::stop(PipelineExecutionContext& pipelineExe
 {
     const auto pipelineExecutionContextRef = nautilus::val<PipelineExecutionContext*>(&pipelineExecutionContext);
     auto ctx = ExecutionContext(pipelineExecutionContextRef, nautilus::val<const Arena*>{nullptr});
-    pipeline->getRootOperator().terminate(ctx);
+    physicalOperatorPipeline->getRootOperator().terminate(ctx);
 }
 
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
     const auto pipelineExecutionContextRef = nautilus::val<PipelineExecutionContext*>(&pipelineExecutionContext);
     auto ctx = ExecutionContext(pipelineExecutionContextRef, nautilus::val<const Arena*>{nullptr});
-    pipeline->getRootOperator().setup(ctx);
+    physicalOperatorPipeline->getRootOperator().setup(ctx);
     pipelineFunctionCompiled = this->compilePipeline();
 }
 
