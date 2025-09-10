@@ -1,0 +1,25 @@
+# name: benchmark/StoreOverhead_Generator.test
+# description: Benchmark baseline vs. TIME TRAVEL STORE using generator source (A/B)
+# groups: [benchmark, Store, Sources]
+
+# Generator source: two fields
+#  - id: UINT64 sequence 0..999999 (1,000,000 rows)
+#  - zero: UINT64 constant 0 (sequence 0..0 with step 0)
+# This keeps one field constant to make checksum predictable while producing many rows.
+Source gen UINT64 id UINT64 zero GENERATOR seed 1, max_runtime_ms 600000, stop_generator_when_sequence_finishes ALL
+id SEQUENCE UINT64 0 999999 1
+zero SEQUENCE UINT64 0 0 0
+
+# Low-overhead sinks (Checksum) to avoid large IO and keep results deterministic
+SINK baselineChecksum TYPE Checksum UINT64 gen$id UINT64 gen$zero
+SINK storeChecksum TYPE Checksum UINT64 gen$id UINT64 gen$zero
+
+# Baseline: no Store operator
+SELECT id, zero FROM gen INTO baselineChecksum
+----
+1000000 411666720
+
+# With Store operator: write rows to a binary file and still forward to sink
+SELECT id, zero FROM gen INTO storeChecksum TIME TRAVEL STORE (FILE_PATH AS 'systest_store_overhead.bin', APPEND AS FALSE, HEADER AS TRUE, FDATASYNC_INTERVAL AS 0)
+----
+1000000 411666720
