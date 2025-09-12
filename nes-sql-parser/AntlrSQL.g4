@@ -58,7 +58,16 @@ singleStatement: statement ';'? EOF;
 
 terminatedStatement: statement ';';
 multipleStatements: (statement (';' statement)* ';'?)? EOF;
-statement: query | createStatement | dropStatement | showStatement;
+statement: query | createStatement | dropStatement | showStatement | insertStatement;
+
+// INSERT INTO STORE(...) VALUES (...), (...)
+insertStatement
+    : INSERT INTO STORE '(' namedConfigExpressionSeq ')' VALUES valuesClause
+    ;
+
+valuesClause
+    : '(' constant (',' constant)* ')' (',' '(' constant (',' constant)* ')')*
+    ;
 
 createStatement: CREATE createDefinition;
 createDefinition: createLogicalSourceDefinition | createPhysicalSourceDefinition | createSinkDefinition;

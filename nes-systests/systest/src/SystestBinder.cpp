@@ -65,6 +65,7 @@
 #include <LegacyOptimizer.hpp>
 #include <SystestParser.hpp>
 #include <SystestState.hpp>
+#include <StatementHandler.hpp>
 
 namespace NES::Systest
 {
@@ -374,6 +375,49 @@ struct SystestBinder::Impl
         {
             throw TestException("Could not successfully load test file://{}", testFilePath.string());
         }
+
+        // Execute INSERT statements eagerly to prepare store files
+        parser.registerOnInsertCallback(
+            [&](std::string stmt)
+            {
+                try
+                {
+                    auto dummySource = std::make_shared<SourceCatalog>();
+                    auto dummySink = std::make_shared<SinkCatalog>();
+                    StatementBinder binder{
+                        dummySource,
+                        dummySink,
+                        [](auto* q) { return AntlrSQLQueryParser::bindLogicalQueryPlan(q); }};
+                    auto bound = binder.parseAndBindSingle(stmt);
+                    if (!bound.has_value())
+                    {
+                        throw bound.error();
+                    }
+                    auto executeInsert = [&](const auto& parsed)
+                    {
+                        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(parsed)>, InsertIntoStoreStatement>)
+                        {
+                            InsertStatementHandler handler;
+                            auto res = handler(parsed);
+                            if (!res.has_value())
+                            {
+                                throw res.error();
+                            }
+                            NES_INFO("Executed INSERT INTO STORE: file {} rows {}", res->filePath, res->rowsInserted);
+                        }
+                        else
+                        {
+                            throw InvalidStatement("Only INSERT INTO STORE is supported in systest statements");
+                        }
+                    };
+                    std::visit(executeInsert, bound.value());
+                }
+                catch (Exception& e)
+                {
+                    tryLogCurrentException();
+                    throw; // propagate
+                }
+            });
 
         /// We create a map from sink names to their schema
         parser.registerOnSystestSinkCallback(

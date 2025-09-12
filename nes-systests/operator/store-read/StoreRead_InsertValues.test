@@ -1,0 +1,26 @@
+# name: operator/store-read/StoreRead_InsertValues.test
+# description: Insert literal rows via INSERT INTO STORE VALUES and read back via TIME_TRAVEL_READ
+# groups: [Store, Read, Insert]
+
+SINK sinkRead UINT64 id UINT64 value UINT64 timestamp
+
+# 1: insert rows into a binary store file using VALUES
+INSERT INTO STORE (
+  FILE_PATH AS '/home/adrian/workspace/nebulastream-public/nes-systests/testdata/small/store_insert_out.bin',
+  APPEND AS FALSE,
+  HEADER AS TRUE,
+  SCHEMA AS 'UINT64 id UINT64 value UINT64 timestamp'
+) VALUES
+  (1, 1, 1000),
+  (2, 1, 1001),
+  (3, 1, 1002),
+  (4, 2, 2000)
+
+# 2: read them back via TIME_TRAVEL_READ and verify
+SELECT id, value, timestamp FROM TIME_TRAVEL_READ('/home/adrian/workspace/nebulastream-public/nes-systests/testdata/small/store_insert_out.bin', 'SCHEMA=UINT64 id UINT64 value UINT64 timestamp') INTO sinkRead
+----
+1,1,1000
+2,1,1001
+3,1,1002
+4,2,2000
+

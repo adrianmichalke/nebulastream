@@ -79,7 +79,12 @@ void BinaryStoreSource::open()
     {
         throw CannotOpenSink("Could not open input file: {}: {}", filePath, std::strerror(errno));
     }
-    // Parse header and set data start offset
+    // Log file size
+    inputFile.seekg(0, std::ios::end);
+    auto fsz = inputFile.tellg();
+    inputFile.seekg(0, std::ios::beg);
+    NES_DEBUG("BinaryStoreSource: file size {} bytes", static_cast<long long>(fsz));
+    // Parse header and set data start offset. Do not block/wait for producer.
     dataStartOffset = parseHeader(inputFile);
     NES_DEBUG("BinaryStoreSource: dataStartOffset={} currentPos={}", dataStartOffset, static_cast<long long>(inputFile.tellg()));
 }
@@ -95,17 +100,21 @@ size_t BinaryStoreSource::fillTupleBuffer(TupleBuffer& tupleBuffer, const std::s
     NES_DEBUG("BinaryStoreSource: fill called at pos {}", static_cast<long long>(startPos));
     if (!inputFile) { return 0; }
 
+    // Non-blocking: do not wait for producer. Consume whatever is present.
+
     // Build RowLayout using current buffer size and the logical source schema
     RowLayout rowLayout(tupleBuffer.getBufferSize(), schema);
     const auto capacity = rowLayout.getCapacity();
-    uint64_t tuplesWritten = 0;
     // Compute fixed row width once
     uint32_t rowWidthBytes = 0;
     for (size_t fieldIdx = 0; fieldIdx < schema.getNumberOfFields(); ++fieldIdx)
     {
         rowWidthBytes += static_cast<uint32_t>(rowLayout.getFieldSize(fieldIdx));
     }
+    NES_INFO("BinaryStoreSource: bufferSize={} capacity={} rowWidthBytes={}", tupleBuffer.getBufferSize(), capacity, rowWidthBytes);
+    uint64_t tuplesWritten = 0;
 
+    // Read up to capacity rows; stop early on EOF
     for (; tuplesWritten < capacity; ++tuplesWritten)
     {
         bool rowOk = true;
@@ -171,15 +180,6 @@ size_t BinaryStoreSource::fillTupleBuffer(TupleBuffer& tupleBuffer, const std::s
             tupleBuffer.setLastChunk(true);
         }
     }
-    else
-    {
-        // If stream is still good but we consumed all data available for now, mark last chunk when at physical EOF
-        if (inputFile.peek() == std::char_traits<char>::eof())
-        {
-            tupleBuffer.setLastChunk(true);
-        }
-    }
-
     NES_DEBUG(
         "BinaryStoreSource: read {} bytes ({} tuples), eof={} fail={}", bytesRead, tuplesWritten, inputFile.eof(), inputFile.fail());
     totalNumBytesRead += bytesRead;

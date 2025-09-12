@@ -96,6 +96,13 @@ struct DropQueryStatementResult
     QueryId id;
 };
 
+// DML: INSERT INTO STORE ... VALUES ...
+struct InsertIntoStoreStatementResult
+{
+    std::string filePath;
+    uint64_t rowsInserted;
+};
+
 using StatementResult = std::variant<
     CreateLogicalSourceStatementResult,
     CreatePhysicalSourceStatementResult,
@@ -108,7 +115,8 @@ using StatementResult = std::variant<
     DropSinkStatementResult,
     QueryStatementResult,
     ShowQueriesStatementResult,
-    DropQueryStatementResult>;
+    DropQueryStatementResult,
+    InsertIntoStoreStatementResult>;
 
 /// A bit of CRTP magic for nicer syntax when the object is in a shared ptr
 template <typename HandlerImpl>
@@ -173,6 +181,14 @@ public:
     std::expected<DropQueryStatementResult, Exception> operator()(const DropQueryStatement& statement);
 
     [[nodiscard]] std::vector<QueryId> getRunningQueries() const;
+};
+
+// DML handler for INSERT INTO STORE
+class InsertStatementHandler final : public StatementHandler<InsertStatementHandler>
+{
+public:
+    InsertStatementHandler() = default;
+    std::expected<InsertIntoStoreStatementResult, Exception> operator()(const InsertIntoStoreStatement& statement);
 };
 
 }

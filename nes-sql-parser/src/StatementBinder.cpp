@@ -194,6 +194,66 @@ public:
         std::unreachable();
     }
 
+    // Bind INSERT INTO STORE ... VALUES ...
+    InsertIntoStoreStatement bindInsertIntoStore(AntlrSQLParser::InsertStatementContext* insertAst) const
+    {
+        // Flatten namedConfigExpressionSeq into key->string map (use last identifier part as key)
+        std::unordered_map<std::string, std::string> opts;
+        for (auto* nce : insertAst->namedConfigExpressionSeq()->namedConfigExpression())
+        {
+            // name AS constant | constant AS name
+            std::string key;
+            std::string val;
+            if (nce->name && nce->constant())
+            {
+                auto* chain = nce->name;
+                // take last identifier component as key
+                if (chain->strictIdentifier().empty())
+                {
+                    throw InvalidConfigParameter("Invalid option name: {}", chain->getText());
+                }
+                key = bindIdentifier(chain->strictIdentifier().back());
+                auto lit = bindLiteral(nce->constant());
+                val = literalToString(lit);
+            }
+            else
+            {
+                throw InvalidConfigParameter("Invalid named config expression: {}", nce->getText());
+            }
+            opts.emplace(std::move(key), std::move(val));
+        }
+
+        // Collect VALUES rows as raw text (to be typed later using SCHEMA)
+        std::vector<std::vector<std::string>> rows;
+        auto* vc = insertAst->valuesClause();
+        if (!vc)
+        {
+            throw InvalidQuerySyntax("INSERT requires VALUES clause");
+        }
+        // Scan children: '(' starts row, ')' ends row; constants inside become values
+        std::vector<std::string> curRow;
+        for (auto* node : vc->children)
+        {
+            if (auto* term = dynamic_cast<antlr4::tree::TerminalNodeImpl*>(node))
+            {
+                const std::string t = term->getText();
+                if (t == "(") { curRow.clear(); }
+                else if (t == ")") {
+                    if (curRow.empty()) throw InvalidQuerySyntax("Empty row in VALUES is not allowed");
+                    rows.emplace_back(curRow);
+                }
+                continue;
+            }
+            if (auto* cst = dynamic_cast<AntlrSQLParser::ConstantContext*>(node))
+            {
+                auto lit = bindLiteral(cst);
+                curRow.emplace_back(literalToString(lit));
+            }
+        }
+
+        return InsertIntoStoreStatement{.options = std::move(opts), .rowsAsText = std::move(rows)};
+    }
+
     [[nodiscard]] std::string literalToString(const Literal& literal) const
     {
         return std::visit(
@@ -662,6 +722,10 @@ public:
             if (auto* const createAST = statementAST->createStatement(); createAST != nullptr)
             {
                 return bindCreateStatement(createAST);
+            }
+            if (auto* const insertAST = statementAST->insertStatement(); insertAST != nullptr)
+            {
+                return bindInsertIntoStore(insertAST);
             }
             if (auto* showAST = statementAST->showStatement(); showAST != nullptr)
             {

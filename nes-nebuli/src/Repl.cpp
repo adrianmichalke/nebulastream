@@ -60,6 +60,7 @@ struct Repl::Impl
     SourceStatementHandler sourceStatementHandler;
     SinkStatementHandler sinkStatementHandler;
     std::shared_ptr<QueryStatementHandler> queryStatementHandler;
+    InsertStatementHandler insertStatementHandler;
     StatementBinder binder;
 
     std::unique_ptr<replxx::Replxx> rx;
@@ -389,6 +390,10 @@ struct Repl::Impl
                 else if constexpr (requires { sinkStatementHandler.apply(stmt); })
                 {
                     return sinkStatementHandler.apply(stmt);
+                }
+                else if constexpr (requires { insertStatementHandler.apply(stmt); })
+                {
+                    return insertStatementHandler.apply(stmt);
                 }
                 else if constexpr (requires { queryStatementHandler->apply(stmt); })
                 {

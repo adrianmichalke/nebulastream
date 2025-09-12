@@ -262,6 +262,18 @@ struct StatementOutputAssembler<DropQueryStatementResult>
     }
 };
 
+template <>
+struct StatementOutputAssembler<InsertIntoStoreStatementResult>
+{
+    using OutputRowType = std::tuple<std::string, uint64_t>;
+    static constexpr std::array<std::string_view, 2> outputColumns{"file_path", "rows_inserted"};
+
+    auto convert(const InsertIntoStoreStatementResult& result)
+    {
+        return std::make_pair(outputColumns, std::vector{std::make_tuple(result.filePath, result.rowsInserted)});
+    }
+};
+
 /// NOLINTEND(readability-convert-member-functions-to-static)
 
 
@@ -277,5 +289,6 @@ static_assert(AssemblembleStatementResult<DropSinkStatementResult>);
 static_assert(AssemblembleStatementResult<QueryStatementResult>);
 static_assert(AssemblembleStatementResult<ShowQueriesStatementResult>);
 static_assert(AssemblembleStatementResult<DropQueryStatementResult>);
+static_assert(AssemblembleStatementResult<InsertIntoStoreStatementResult>);
 
 }

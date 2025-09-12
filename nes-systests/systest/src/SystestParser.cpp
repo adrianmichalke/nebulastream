@@ -189,6 +189,7 @@ static const std::array stringToToken = std::to_array<std::pair<std::string_view
     {{SystestLogicalSourceToken, TokenType::LOGICAL_SOURCE},
      {AttachSourceToken, TokenType::ATTACH_SOURCE},
      {QueryToken, TokenType::QUERY},
+     {"INSERT", TokenType::INSERT},
      {SinkToken, TokenType::SINK},
      {ResultDelimiter, TokenType::RESULT_DELIMITER},
      {ErrorToken, TokenType::ERROR_EXPECTATION}});
@@ -250,6 +251,11 @@ void SystestParser::registerOnQueryCallback(QueryCallback callback)
 void SystestParser::registerOnResultTuplesCallback(ResultTuplesCallback callback)
 {
     this->onResultTuplesCallback = std::move(callback);
+}
+
+void SystestParser::registerOnInsertCallback(InsertCallback callback)
+{
+    this->onInsertCallback = std::move(callback);
 }
 
 void SystestParser::registerOnSystestLogicalSourceCallback(SystestLogicalSourceCallback callback)
@@ -314,6 +320,13 @@ void SystestParser::parse()
                 }
                 break;
             }
+            case TokenType::INSERT: {
+                if (onInsertCallback)
+                {
+                    onInsertCallback(expectStatementUntilBlankLine());
+                }
+                break;
+            }
             case TokenType::RESULT_DELIMITER: {
                 /// Look ahead for error expectation
                 if (const auto optionalToken = peekToken(); optionalToken == TokenType::ERROR_EXPECTATION)
@@ -334,9 +347,20 @@ void SystestParser::parse()
                 }
                 break;
             }
-            case TokenType::INVALID:
+            case TokenType::INVALID: {
+                // Fallback: treat a line starting with INSERT as an INSERT statement
+                auto cur = std::string(Util::trimWhiteSpaces(lines[currentLine]));
+                if (Util::toUpperCase(cur).rfind("INSERT", 0) == 0)
+                {
+                    if (onInsertCallback)
+                    {
+                        onInsertCallback(expectStatementUntilBlankLine());
+                        break;
+                    }
+                }
                 throw SLTUnexpectedToken(
                     "Should never run into the INVALID token during systest file parsing, but got line: {}.", lines[currentLine]);
+            }
             case TokenType::ERROR_EXPECTATION:
                 throw TestException(
                     "Should never run into the ERROR_EXPECTATION token during systest file parsing, but got line: {}", lines[currentLine]);
@@ -366,18 +390,15 @@ void SystestParser::applySubstitutionRules(std::string& line)
 
 std::optional<TokenType> SystestParser::getTokenIfValid(std::string potentialToken)
 {
-    /// Query is a special case as it's identifying token is not space seperated
-    if (Util::toLowerCase(potentialToken).starts_with(Util::toLowerCase(QueryToken)))
-    {
-        return TokenType::QUERY;
-    }
-    /// Lookup in map
-    const auto* it = std::ranges::find_if(
-        stringToToken, [&potentialToken](const auto& pair) { return Util::toLowerCase(pair.first) == Util::toLowerCase(potentialToken); });
-    if (it != stringToToken.end())
-    {
-        return it->second;
-    }
+    // Use the first token on the line to classify
+    auto tokUpper = Util::toUpperCase(potentialToken);
+    if (tokUpper == Util::toUpperCase(std::string(SystestLogicalSourceToken))) return TokenType::LOGICAL_SOURCE;
+    if (tokUpper == Util::toUpperCase(std::string(AttachSourceToken))) return TokenType::ATTACH_SOURCE;
+    if (tokUpper == Util::toUpperCase(std::string(SinkToken))) return TokenType::SINK;
+    if (tokUpper == Util::toUpperCase(std::string(QueryToken))) return TokenType::QUERY;
+    if (tokUpper == "INSERT") return TokenType::INSERT;
+    if (Util::toLowerCase(potentialToken) == Util::toLowerCase(ResultDelimiter)) return TokenType::RESULT_DELIMITER;
+    if (tokUpper == Util::toUpperCase(std::string(ErrorToken))) return TokenType::ERROR_EXPECTATION;
     return TokenType::INVALID;
 }
 
@@ -415,7 +436,13 @@ std::optional<TokenType> SystestParser::getNextToken()
     stream >> potentialToken;
 
     INVARIANT(!potentialToken.empty(), "a potential token should never be empty");
-
+    // Special-case: allow INSERT statements even if the first tokenization fails
+    auto trimmedLine = std::string(Util::trimWhiteSpaces(lines[currentLine]));
+    auto upperLine = Util::toUpperCase(trimmedLine);
+    if (upperLine.rfind("INSERT", 0) == 0)
+    {
+        return TokenType::INSERT;
+    }
     return getTokenIfValid(potentialToken);
 }
 
@@ -437,6 +464,9 @@ std::optional<TokenType> SystestParser::peekToken() const
     stream >> potentialToken;
 
     INVARIANT(!potentialToken.empty(), "a potential token should never be empty");
+    // Classification based on first token is sufficient for INSERT and others
+    auto tokUpper = Util::toUpperCase(potentialToken);
+    if (tokUpper == "INSERT") return TokenType::INSERT;
     return getTokenIfValid(potentialToken);
 }
 
@@ -728,6 +758,30 @@ std::string SystestParser::expectQuery()
     }
     INVARIANT(!queryString.empty(), "when expecting a query keyword the queryString should not be empty");
     return queryString;
+}
+
+std::string SystestParser::expectStatementUntilBlankLine()
+{
+    INVARIANT(currentLine < lines.size(), "current line to parse should exist");
+    std::string stmt;
+    bool firstLine = true;
+    while (currentLine < lines.size())
+    {
+        if (emptyOrComment(lines[currentLine]))
+        {
+            // stop when we hit a blank/comment line
+            break;
+        }
+        if (!firstLine)
+        {
+            stmt += "\n";
+        }
+        stmt += lines[currentLine];
+        firstLine = false;
+        ++currentLine;
+    }
+    INVARIANT(!stmt.empty(), "when expecting a statement the string should not be empty");
+    return stmt;
 }
 
 SystestParser::ErrorExpectation SystestParser::expectError() const

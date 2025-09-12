@@ -124,6 +124,14 @@ struct DropQueryStatement
     QueryId id;
 };
 
+// INSERT INTO STORE(...options...) VALUES (...), (...)
+struct InsertIntoStoreStatement
+{
+    std::unordered_map<std::string, std::string> options; // flattened key->value string map
+    // rows of literals in positional order matching the provided SCHEMA option
+    std::vector<std::vector<std::string>> rowsAsText; // keep as text; cast later during execution
+};
+
 using Statement = std::variant<
     CreateLogicalSourceStatement,
     CreatePhysicalSourceStatement,
@@ -136,7 +144,8 @@ using Statement = std::variant<
     QueryStatement,
     ShowQueriesStatement,
     ShowSinksStatement,
-    DropQueryStatement>;
+    DropQueryStatement,
+    InsertIntoStoreStatement>;
 
 inline std::optional<StatementOutputFormat> getOutputFormat(const Statement& statement)
 {

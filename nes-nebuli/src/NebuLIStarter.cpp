@@ -206,6 +206,7 @@ int main(int argc, char** argv)
             NES::SourceStatementHandler sourceStatementHandler{sourceCatalog};
             NES::SinkStatementHandler sinkStatementHandler{sinkCatalog};
             auto queryStatementHandler = std::make_shared<NES::QueryStatementHandler>(queryManager, optimizer);
+            // Insert handler is default-constructible
             NES::Repl replClient(
                 std::move(sourceStatementHandler),
                 std::move(sinkStatementHandler),

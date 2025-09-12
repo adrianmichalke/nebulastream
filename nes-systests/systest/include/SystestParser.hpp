@@ -44,6 +44,7 @@ enum class TokenType : uint8_t
     ATTACH_SOURCE,
     SINK,
     QUERY,
+    INSERT,
     RESULT_DELIMITER,
     ERROR_EXPECTATION,
 };
@@ -147,6 +148,7 @@ public:
 
     using QueryCallback = std::function<void(std::string, SystestQueryId)>;
     using ResultTuplesCallback = std::function<void(std::vector<std::string>&&, SystestQueryId correspondingQueryId)>;
+    using InsertCallback = std::function<void(std::string)>;
     using SystestLogicalSourceCallback = std::function<void(const SystestLogicalSource&)>;
     using SystestAttachSourceCallback = std::function<void(SystestAttachSource attachSource)>;
     using SystestSinkCallback = std::function<void(SystestSink&&)>;
@@ -155,6 +157,7 @@ public:
     /// Register callbacks to be called when the respective section is parsed
     void registerOnQueryCallback(QueryCallback callback);
     void registerOnResultTuplesCallback(ResultTuplesCallback callback);
+    void registerOnInsertCallback(InsertCallback callback);
     void registerOnSystestLogicalSourceCallback(SystestLogicalSourceCallback callback);
     void registerOnSystestAttachSourceCallback(SystestAttachSourceCallback callback);
     void registerOnSystestSinkCallback(SystestSinkCallback callback);
@@ -183,12 +186,15 @@ private:
     [[nodiscard]] std::vector<std::string> expectTuples(bool ignoreFirst);
     [[nodiscard]] std::filesystem::path expectFilePath();
     [[nodiscard]] std::string expectQuery();
+    // Read a free-form SQL statement (e.g., INSERT) until a blank line
+    [[nodiscard]] std::string expectStatementUntilBlankLine();
     [[nodiscard]] ErrorExpectation expectError() const;
     [[nodiscard]] std::pair<SystestLogicalSource, std::optional<SystestAttachSource>>
     expectInlineGeneratorSource(SystestLogicalSource& source, const std::vector<std::string>& attachSourceTokens);
 
     QueryCallback onQueryCallback;
     ResultTuplesCallback onResultTuplesCallback;
+    InsertCallback onInsertCallback;
     SystestLogicalSourceCallback onSystestLogicalSourceCallback;
     SystestAttachSourceCallback onAttachSourceCallback;
     SystestSinkCallback onSystestSinkCallback;
