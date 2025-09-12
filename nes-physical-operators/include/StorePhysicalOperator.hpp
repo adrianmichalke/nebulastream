@@ -54,11 +54,8 @@ private:
 
     OperatorHandlerId handlerId;
     Schema inputSchema;
-    std::vector<std::string> fieldNames;
-    std::vector<DataType> fieldTypes;
-    std::vector<uint32_t> fieldSizes;
-    std::vector<uint32_t> fieldOffsets;
-    uint32_t rowWidth{0};
+    // Use BinaryRowEncoder for dynamic sizing + encoding
+    Nautilus::BinaryRowEncoder encoder;
 
     std::optional<PhysicalOperator> child;
 };

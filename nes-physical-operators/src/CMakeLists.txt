@@ -30,6 +30,8 @@ add_source_files(nes-physical-operators
 
 add_source_files(nes-physical-operators
         StoreOperatorHandler.cpp)
+add_source_files(nes-physical-operators
+        StoreIoUringBackend.cpp)
 
 add_subdirectory(Aggregation)
 add_subdirectory(Watermark)

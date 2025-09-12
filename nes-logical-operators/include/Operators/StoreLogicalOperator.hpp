@@ -100,7 +100,7 @@ struct StoreLogicalOperator final : LogicalOperatorConcept
 
         static inline const DescriptorConfig::ConfigParameter<EnumWrapper, StoreAsyncBackend> ASYNC_BACKEND{
             "async_backend",
-            EnumWrapper(std::string("posix")),
+            EnumWrapper(std::string("POSIX")),
             [](const std::unordered_map<std::string, std::string>& cfg) { return DescriptorConfig::tryGet(ASYNC_BACKEND, cfg); }};
 
         static inline const DescriptorConfig::ConfigParameter<bool> DIRECT_IO{
@@ -113,9 +113,14 @@ struct StoreLogicalOperator final : LogicalOperatorConcept
             0u,
             [](const std::unordered_map<std::string, std::string>& cfg) { return DescriptorConfig::tryGet(FDATASYNC_INTERVAL, cfg); }};
 
+        static inline const DescriptorConfig::ConfigParameter<bool> FLUSH_ON_CLOSE{
+            "flush_on_close",
+            false,
+            [](const std::unordered_map<std::string, std::string>& cfg) { return DescriptorConfig::tryGet(FLUSH_ON_CLOSE, cfg); }};
+
         static inline std::unordered_map<std::string, DescriptorConfig::ConfigParameterContainer> parameterMap
             = DescriptorConfig::createConfigParameterContainerMap(
-                FILE_PATH, APPEND, HEADER, CHUNK_MIN_BYTES, ASYNC_BACKEND, DIRECT_IO, FDATASYNC_INTERVAL);
+                FILE_PATH, APPEND, HEADER, CHUNK_MIN_BYTES, ASYNC_BACKEND, DIRECT_IO, FDATASYNC_INTERVAL, FLUSH_ON_CLOSE);
     };
 
     static DescriptorConfig::Config validateAndFormatConfig(std::unordered_map<std::string, std::string> configPairs);

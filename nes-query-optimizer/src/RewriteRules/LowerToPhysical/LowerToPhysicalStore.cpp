@@ -40,9 +40,17 @@ RewriteRuleResultSubgraph LowerToPhysicalStore::apply(LogicalOperator logicalOpe
     const auto header = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::HEADER);
     const auto directIO = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::DIRECT_IO);
     const auto fdatasyncInterval = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::FDATASYNC_INTERVAL);
+    const auto flushOnClose = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::FLUSH_ON_CLOSE);
+    const auto chunkMinBytes = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::CHUNK_MIN_BYTES);
+    const auto asyncBackendLogical = logicalCfg.getFromConfig(StoreLogicalOperator::ConfigParameters::ASYNC_BACKEND);
 
     std::stringstream schemaStream;
     schemaStream << logicalOperator.getOutputSchema();
+
+    // Map logical backend enum to handler backend enum (kept local to avoid coupling layers)
+    StoreOperatorHandler::AsyncBackend handlerBackend
+        = (asyncBackendLogical == StoreAsyncBackend::IO_URING) ? StoreOperatorHandler::AsyncBackend::IO_URING
+                                                               : StoreOperatorHandler::AsyncBackend::POSIX;
 
     StoreOperatorHandler::Config handlerCfg{
         .filePath = filePath,
@@ -51,6 +59,9 @@ RewriteRuleResultSubgraph LowerToPhysicalStore::apply(LogicalOperator logicalOpe
         .directIO = directIO,
         .fdatasyncInterval = fdatasyncInterval,
         .schemaText = schemaStream.str(),
+        .chunkMinBytes = chunkMinBytes,
+        .asyncBackend = handlerBackend,
+        .flushOnClose = flushOnClose,
     };
 
     auto handlerId = getNextOperatorHandlerId();

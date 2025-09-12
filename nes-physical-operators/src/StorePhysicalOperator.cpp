@@ -51,32 +51,8 @@ void stopHandlerProxy(OperatorHandler* handler, PipelineExecutionContext* pipeli
 }
 
 StorePhysicalOperator::StorePhysicalOperator(OperatorHandlerId handlerId, const Schema& inputSchema)
-    : handlerId(handlerId), inputSchema(inputSchema)
+    : handlerId(handlerId), inputSchema(inputSchema), encoder(this->inputSchema)
 {
-    fieldNames.reserve(this->inputSchema.getNumberOfFields());
-    fieldTypes.reserve(this->inputSchema.getNumberOfFields());
-    fieldSizes.reserve(this->inputSchema.getNumberOfFields());
-    fieldOffsets.reserve(this->inputSchema.getNumberOfFields());
-    uint32_t offset = 0;
-    for (const auto& f : this->inputSchema.getFields())
-    {
-        fieldNames.emplace_back(f.name);
-        fieldTypes.emplace_back(f.dataType);
-        uint32_t sz = 0;
-        switch (f.dataType.type)
-        {
-            case DataType::Type::VARSIZED:
-            case DataType::Type::VARSIZED_POINTER_REP:
-                sz = 0; // unsupported in phase 1
-                break;
-            default:
-                sz = f.dataType.getSizeInBytes();
-        }
-        fieldSizes.emplace_back(sz);
-        fieldOffsets.emplace_back(offset);
-        offset += sz;
-    }
-    rowWidth = offset;
 }
 
 void StorePhysicalOperator::setup(ExecutionContext& executionCtx) const
@@ -115,38 +91,40 @@ void StorePhysicalOperator::open(ExecutionContext& executionCtx, Nautilus::Recor
 
 void StorePhysicalOperator::encodeAndAppend(Nautilus::Record& record, ExecutionContext& executionCtx) const
 {
-    // Encode fixed-width fields into a host buffer to avoid nautilus arena lifetime issues
-    // Note: variable-sized fields are not supported in phase 1
-    std::vector<uint8_t> row;
-    row.resize(rowWidth);
-    for (size_t i = 0; i < fieldNames.size(); ++i)
-    {
-        const auto sz = fieldSizes[i];
-        if (sz == 0)
-        {
-            // Skip var-sized fields in phase 1
-            continue;
-        }
-        const auto name = fieldNames[i];
-        const auto dstPtr = reinterpret_cast<int8_t*>(row.data() + fieldOffsets[i]);
-        auto dstVal = nautilus::val<int8_t*>(dstPtr);
-        const auto vv = record.read(name);
-        vv.writeToMemory(dstVal);
-    }
+    using namespace nautilus;
+    // Compute row size dynamically (supports fixed & var-sized fields)
+    auto rowSize = encoder.computeSize(record);
 
-    // Append via handler
-    auto handler = executionCtx.getGlobalOperatorHandler(handlerId);
-    auto dataPtr = nautilus::val<int8_t*>(reinterpret_cast<int8_t*>(row.data()));
-    nautilus::invoke(
-        +[](OperatorHandler* h, int8_t* data, uint32_t len) {
+    // Reserve destination bytes in the handler's shard for the current worker
+    auto handlerPtr = executionCtx.getGlobalOperatorHandler(handlerId);
+    auto dst = nautilus::invoke(
+        +[](OperatorHandler* h, PipelineExecutionContext* pctx, uint32_t len) -> int8_t* {
             if (auto* store = dynamic_cast<StoreOperatorHandler*>(h))
             {
-                store->append(reinterpret_cast<const uint8_t*>(data), static_cast<size_t>(len));
+                const uint32_t wid = pctx->getId().getRawValue();
+                return reinterpret_cast<int8_t*>(store->reserve(wid, len));
+            }
+            return static_cast<int8_t*>(nullptr);
+        },
+        handlerPtr,
+        executionCtx.pipelineContext,
+        rowSize);
+
+    // Encode directly into reserved memory
+    encoder.encodeTo(record, dst);
+
+    // Commit bytes
+    nautilus::invoke(
+        +[](OperatorHandler* h, PipelineExecutionContext* pctx, uint32_t len) {
+            if (auto* store = dynamic_cast<StoreOperatorHandler*>(h))
+            {
+                const uint32_t wid = pctx->getId().getRawValue();
+                store->commit(wid, len);
             }
         },
-        handler,
-        dataPtr,
-        nautilus::val<uint32_t>(rowWidth));
+        handlerPtr,
+        executionCtx.pipelineContext,
+        rowSize);
 }
 
 void StorePhysicalOperator::execute(ExecutionContext& executionCtx, Nautilus::Record& record) const
@@ -166,6 +144,19 @@ void StorePhysicalOperator::close(ExecutionContext& executionCtx, Nautilus::Reco
     {
         closeChild(executionCtx, recordBuffer);
     }
+
+    // Commit and optionally flush WAL on buffer close if enabled
+    auto handler = executionCtx.getGlobalOperatorHandler(handlerId);
+    nautilus::invoke(
+        +[](OperatorHandler* h, PipelineExecutionContext* pctx) {
+            if (auto* store = dynamic_cast<StoreOperatorHandler*>(h))
+            {
+                const uint32_t wid = pctx->getId().getRawValue();
+                store->commitBuffer(wid);
+            }
+        },
+        handler,
+        executionCtx.pipelineContext);
 }
 
 void StorePhysicalOperator::terminate(ExecutionContext& executionCtx) const

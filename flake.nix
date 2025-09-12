@@ -156,6 +156,7 @@
             boost
             folly
             glog
+            liburing
             
             # Add cpptrace for error handling
             cpptrace
@@ -242,7 +243,7 @@
           echo "LLVM 18 compiler symlinks created in $CLANG_SYMLINK_DIR"
         '';
 
-	    LD_LIBRARY_PATH = lib.makeLibraryPath ([
+        LD_LIBRARY_PATH = lib.makeLibraryPath ([
             stdenv.cc.cc.lib
             yaml-cpp
             grpc
@@ -258,6 +259,7 @@
             zlib
             zstd
             cpptrace
+            liburing
             libffi
             re2
             c-ares
@@ -276,7 +278,7 @@
         ]));
 
 	    # CMake and pkg-config paths for all dependencies
-	    CMAKE_PREFIX_PATH = with pkgs; lib.makeSearchPath "lib/cmake" [
+        CMAKE_PREFIX_PATH = with pkgs; lib.makeSearchPath "lib/cmake" [
             llvmPackages_19.clang
             llvmPackages_19.llvm
             llvmPackages_19.mlir
@@ -322,6 +324,7 @@
             zlib
             protobuf
             capnproto
+            liburing
         ];
       };
   };

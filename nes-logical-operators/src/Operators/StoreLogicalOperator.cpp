@@ -207,7 +207,35 @@ DescriptorConfig::Config StoreLogicalOperator::validateAndFormatConfig(std::unor
                 fmt::format("For direct_io=true, chunk_min_bytes must be 4096-byte aligned, got {}", chunkMin));
         }
     }
-    // async_backend validation is deferred to runtime build flags; no change to config here
+    // Normalize async_backend to match enum names (accept case-insensitive user strings)
+    if (auto it = cfg.find(std::string(ConfigParameters::ASYNC_BACKEND)); it != cfg.end())
+    {
+        if (std::holds_alternative<EnumWrapper>(it->second))
+        {
+            auto ew = std::get<EnumWrapper>(it->second);
+            std::string v = ew.getValue();
+            // uppercase and convert dashes to underscores for safety
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            for (auto& c : v)
+            {
+                if (c == '-')
+                {
+                    c = '_';
+                }
+            }
+            // known aliases
+            if (v == "POSIX" || v == "IO_URING")
+            {
+                it->second = EnumWrapper(v);
+            }
+            else
+            {
+                // fallback to POSIX
+                it->second = EnumWrapper(std::string("POSIX"));
+            }
+        }
+    }
+    // async_backend validation beyond normalization is deferred to runtime build flags
     return cfg;
 }
 
