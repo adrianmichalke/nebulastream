@@ -229,7 +229,9 @@ public:
         /// the InputFormatterTask does not need to do anything.
         /// @Note: with a Nautilus implementation, we can skip the proxy function call that triggers formatting/indexing during tracing,
         /// leading to generated code that immediately operates on the data.
-        const auto [div, mod] = std::lldiv(static_cast<int64_t>(rawBuffer.getNumberOfTuples()), this->schemaInfo.getSizeOfTupleInBytes());
+        // For native input, we expect rawBuffer to carry the byte size of valid data; validate divisibility by tuple size.
+        const auto [div, mod]
+            = std::lldiv(static_cast<int64_t>(rawBuffer.getNumberOfBytes()), this->schemaInfo.getSizeOfTupleInBytes());
         PRECONDITION(
             mod == 0,
             "Raw buffer contained {} bytes, which is not a multiple of the tuple size {} bytes.",

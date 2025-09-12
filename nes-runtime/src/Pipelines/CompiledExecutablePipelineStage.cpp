@@ -66,7 +66,6 @@ CompiledExecutablePipelineStage::compilePipeline() const
         {
             auto ctx = ExecutionContext(pipelineExecutionContext, arenaRef);
             RecordBuffer recordBuffer(recordBufferRef);
-
             pipeline->getRootOperator().open(ctx, recordBuffer);
             pipeline->getRootOperator().close(ctx, recordBuffer);
         };
@@ -98,9 +97,6 @@ std::ostream& CompiledExecutablePipelineStage::toString(std::ostream& os) const
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
-    Arena arena(pipelineExecutionContext.getBufferManager());
-    ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
-    pipeline->getRootOperator().setup(ctx);
     compiledPipelineFunction = this->compilePipeline();
 }
 

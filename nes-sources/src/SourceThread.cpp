@@ -136,13 +136,8 @@ dataSourceThreadRoutine(const std::stop_token& stopToken, Source& source, Abstra
 
         if (numReadBytes != 0)
         {
-            // If the source has already produced row-formatted tuples and set the tuple count itself
-            // (e.g., BinaryStoreSource), do not overwrite it with the raw byte count.
-            if (dynamic_cast<BinaryStoreSource*>(&source) == nullptr)
-            {
-                // Report raw bytes for downstream input formatters to compute tuple counts
-                emptyBuffer.setNumberOfTuples(numReadBytes);
-            }
+            // Report raw bytes in numberOfTuples for the input formatter pipeline (Native uses this as byte count)
+            emptyBuffer.setNumberOfTuples(numReadBytes);
             emit(emptyBuffer, true);
         }
 

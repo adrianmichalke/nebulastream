@@ -51,6 +51,8 @@ private:
         uint32_t fixedSize; // 0 for var-sized
     };
     std::vector<FieldInfo> fields;
+    bool allFixed{true};
+    uint32_t fixedRowSize{0};
 };
 
 }

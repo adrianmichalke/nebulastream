@@ -30,25 +30,6 @@
 namespace NES
 {
 
-namespace
-{
-// Proxy helpers similar to patterns in WindowProbePhysicalOperator
-void setupHandlerProxy(OperatorHandler* handler, PipelineExecutionContext* pipelineCtx)
-{
-    if (!handler || !pipelineCtx)
-    {
-        return;
-    }
-    handler->start(*pipelineCtx, 0);
-}
-
-void stopHandlerProxy(OperatorHandler* handler, PipelineExecutionContext* pipelineCtx)
-{
-    PRECONDITION(handler != nullptr, "OperatorHandler must not be null");
-    PRECONDITION(pipelineCtx != nullptr, "PipelineExecutionContext must not be null");
-    handler->stop(QueryTerminationType::Graceful, *pipelineCtx);
-}
-}
 
 StorePhysicalOperator::StorePhysicalOperator(OperatorHandlerId handlerId, const Schema& inputSchema)
     : handlerId(handlerId), inputSchema(inputSchema), encoder(this->inputSchema)
@@ -57,12 +38,12 @@ StorePhysicalOperator::StorePhysicalOperator(OperatorHandlerId handlerId, const 
 
 void StorePhysicalOperator::setup(ExecutionContext& executionCtx) const
 {
-    // Start the handler once per pipeline lifetime
+    // Only propagate setup to the child. Avoid invoking handler lifecycle here to keep setup free of DSL side effects
+    // in runtime-compiled initialization. Handler initialization happens in open/close/execute.
     if (child.has_value())
     {
         setupChild(executionCtx);
     }
-    nautilus::invoke(setupHandlerProxy, executionCtx.getGlobalOperatorHandler(handlerId), executionCtx.pipelineContext);
 }
 
 void StorePhysicalOperator::open(ExecutionContext& executionCtx, Nautilus::RecordBuffer& recordBuffer) const
@@ -72,8 +53,15 @@ void StorePhysicalOperator::open(ExecutionContext& executionCtx, Nautilus::Recor
     {
         openChild(executionCtx, recordBuffer);
     }
-    // Ensure header creation at open-time per design.
+    // Start handler and ensure header at open-time per design.
     auto handler = executionCtx.getGlobalOperatorHandler(handlerId);
+    nautilus::invoke(
+        +[](OperatorHandler* h, PipelineExecutionContext* pctx) {
+            if (!h || !pctx) { return; }
+            h->start(*pctx, 0);
+        },
+        handler,
+        executionCtx.pipelineContext);
     nautilus::invoke(
         +[](OperatorHandler* h, PipelineExecutionContext* pctx) {
             if (!h || !pctx)
@@ -162,7 +150,13 @@ void StorePhysicalOperator::close(ExecutionContext& executionCtx, Nautilus::Reco
 void StorePhysicalOperator::terminate(ExecutionContext& executionCtx) const
 {
     // Stop handler and then children
-    nautilus::invoke(stopHandlerProxy, executionCtx.getGlobalOperatorHandler(handlerId), executionCtx.pipelineContext);
+    nautilus::invoke(
+        +[](OperatorHandler* h, PipelineExecutionContext* pctx) {
+            if (!h || !pctx) { return; }
+            h->stop(QueryTerminationType::Graceful, *pctx);
+        },
+        executionCtx.getGlobalOperatorHandler(handlerId),
+        executionCtx.pipelineContext);
     if (child.has_value())
     {
         terminateChild(executionCtx);

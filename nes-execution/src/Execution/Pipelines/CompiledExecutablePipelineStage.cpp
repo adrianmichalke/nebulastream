@@ -74,9 +74,6 @@ void CompiledExecutablePipelineStage::stop(PipelineExecutionContext& pipelineExe
 
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
-    const auto pipelineExecutionContextRef = nautilus::val<PipelineExecutionContext*>(&pipelineExecutionContext);
-    auto ctx = ExecutionContext(pipelineExecutionContextRef, nautilus::val<const Arena*>{nullptr});
-    physicalOperatorPipeline->getRootOperator().setup(ctx);
     pipelineFunctionCompiled = this->compilePipeline();
 }
 
