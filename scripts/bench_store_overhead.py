@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from datetime import datetime
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +24,7 @@ TEMPLATE_HEADER = """# name: benchmark/StoreOverhead_Gen_Auto.test
 """
 
 
-def make_test_content(rows: int, width: int) -> str:
+def make_test_content(rows: int, width: int, backend: str = "POSIX", flush_on_close: bool = False, chunk_min_bytes: int | None = None) -> str:
     # Base fields: id, zero => 16 bytes
     base_bytes = 16
     if width < base_bytes:
@@ -60,8 +61,12 @@ def make_test_content(rows: int, width: int) -> str:
     select_baseline = ("SELECT id, zero FROM gen INTO baselineChecksum\n"
                        "----\n" f"{rows} {chk}\n")
 
+    backend_norm = backend.upper()
+    foc = "TRUE" if flush_on_close else "FALSE"
+    chunk_part = f", CHUNK_MIN_BYTES AS {chunk_min_bytes}" if chunk_min_bytes else ""
     select_store = ("SELECT id, zero FROM gen INTO storeChecksum TIME TRAVEL STORE "
-                    "(FILE_PATH AS 'systest_store_overhead.bin', APPEND AS FALSE, HEADER AS TRUE, FDATASYNC_INTERVAL AS 0)\n"
+                    "(FILE_PATH AS 'systest_store_overhead.bin', APPEND AS FALSE, HEADER AS TRUE, FDATASYNC_INTERVAL AS 0, "
+                    f"ASYNC_BACKEND AS '{backend_norm}', FLUSH_ON_CLOSE AS {foc}{chunk_part})\n"
                     "----\n" f"{rows} {chk}\n")
 
     return (
@@ -161,7 +166,7 @@ def summarize_results(bench_json: list[dict]) -> tuple[float, float, float, floa
     return bt, st, delta, overhead_pct, (btu if not math.isnan(btu) else float("nan"))
 
 
-def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = ""):
+def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = "", name_suffix: str = ""):
     try:
         ensure_matplotlib()
         import pandas as pd
@@ -169,30 +174,41 @@ def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = ""):
         import seaborn as sns
 
         df = pd.read_csv(csv_path)
-        # Plot 1: Overhead vs. rows by width
+        # Plot 1: Overhead vs. rows by backend+flush
         plt.figure(figsize=(8, 5))
-        sns.lineplot(data=df, x="rows", y="overhead_pct", hue="width_bytes", marker="o")
+        df1 = df.copy()
+        df1["variant"] = df1["backend"] + "/foc=" + df1["flush_on_close"].astype(str)
+        sns.lineplot(data=df1, x="rows", y="overhead_pct", hue="variant", style="width_bytes", marker="o")
         plt.title(f"Store Overhead vs Rows{title_suffix}")
         plt.ylabel("Overhead (%)")
         plt.xlabel("Rows")
         plt.xlim(left=0)
         plt.ylim(bottom=0)
+        try:
+            plt.xticks(sorted(df["rows"].unique()))
+        except Exception:
+            pass
         plt.grid(True, alpha=0.3)
-        out1 = out_dir / "plot_overhead_vs_rows.png"
+        suffix = f"_{name_suffix}" if name_suffix else ""
+        out1 = out_dir / f"plot_overhead_vs_rows{suffix}.png"
         plt.tight_layout()
         plt.savefig(out1, dpi=160)
         plt.close()
 
-        # Plot 2: Overhead vs width by rows
+        # Plot 2: Overhead vs width by backend+rows
         plt.figure(figsize=(8, 5))
-        sns.lineplot(data=df, x="width_bytes", y="overhead_pct", hue="rows", marker="o")
+        sns.lineplot(data=df1, x="width_bytes", y="overhead_pct", hue="variant", style="rows", marker="o")
         plt.title(f"Store Overhead vs Row Width{title_suffix}")
         plt.ylabel("Overhead (%)")
         plt.xlabel("Row width (bytes)")
         plt.xlim(left=0)
         plt.ylim(bottom=0)
+        try:
+            plt.xticks(sorted(df["width_bytes"].unique()))
+        except Exception:
+            pass
         plt.grid(True, alpha=0.3)
-        out2 = out_dir / "plot_overhead_vs_width.png"
+        out2 = out_dir / f"plot_overhead_vs_width{suffix}.png"
         plt.tight_layout()
         plt.savefig(out2, dpi=160)
         plt.close()
@@ -213,6 +229,8 @@ def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = ""):
                 "rows": int(float(row["rows"])),
                 "width": int(float(row["width_bytes"])),
                 "overhead": float(row["overhead_pct"]),
+                "backend": row.get("backend", "POSIX"),
+                "flush_on_close": row.get("flush_on_close", "False"),
             })
 
     if not rows:
@@ -250,12 +268,15 @@ def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = ""):
         # axes
         parts.append(f"<line x1='{M}' y1='{H-M}' x2='{W-M}' y2='{H-M}' stroke='black'/>")
         parts.append(f"<line x1='{M}' y1='{M}' x2='{M}' y2='{H-M}' stroke='black'/>")
+        # axis labels
+        parts.append(f"<text x='{W/2}' y='{H-10}' text-anchor='middle' font-size='14' font-family='sans-serif'>{xlabel}</text>")
+        parts.append(f"<text x='{M/2}' y='{H/2}' transform='rotate(-90 {M/2},{H/2})' text-anchor='middle' font-size='14' font-family='sans-serif'>Overhead (%)</text>")
         # x ticks
         for x in xs:
             X = sx(x)
             parts.append(f"<line x1='{X}' y1='{H-M}' x2='{X}' y2='{H-M+5}' stroke='black'/>")
             parts.append(f"<text x='{X}' y='{H-M+20}' text-anchor='middle' font-size='12' font-family='sans-serif'>{x}</text>")
-        parts.append(f"<text x='{W/2}' y='{H-10}' text-anchor='middle' font-size='14' font-family='sans-serif'>{xlabel}</text>")
+        # (xlabel added above)
         # y ticks (5)
         for i in range(6):
             y = ymin + i*(ymax - ymin)/5
@@ -287,24 +308,33 @@ def plot_csv(csv_path: Path, out_dir: Path, title_suffix: str = ""):
         Path(outfile).write_text("\n".join(parts))
         print(f"[plot] Saved: {outfile}")
 
-    # Overhead vs rows (series by width)
-    save_svg(rows, xkey="rows", series_key="width", title="Store Overhead vs Rows", xlabel="Rows",
-             outfile=out_dir / "plot_overhead_vs_rows.svg")
-    # Overhead vs width (series by rows)
-    save_svg(rows, xkey="width", series_key="rows", title="Store Overhead vs Row Width", xlabel="Row width (bytes)",
-             outfile=out_dir / "plot_overhead_vs_width.svg")
+    # Overhead vs rows (series by backend+width)
+    # Collapse series to combined label "backend-width"
+    for d in rows:
+        d["series_bw"] = f"{d['backend']}/foc={d['flush_on_close']}-w{d['width']}"
+    suffix = f"_{name_suffix}" if name_suffix else ""
+    save_svg(rows, xkey="rows", series_key="series_bw", title="Store Overhead vs Rows (by backend+width)", xlabel="Rows",
+             outfile=out_dir / f"plot_overhead_vs_rows{suffix}.svg")
+    # Overhead vs width (series by backend+rows)
+    for d in rows:
+        d["series_br"] = f"{d['backend']}/foc={d['flush_on_close']}-r{d['rows']}"
+    save_svg(rows, xkey="width", series_key="series_br", title="Store Overhead vs Row Width (by backend+rows)", xlabel="Row width (bytes)",
+             outfile=out_dir / f"plot_overhead_vs_width{suffix}.svg")
 
 
 def main():
     ap = argparse.ArgumentParser(description="Benchmark Store operator overhead and produce plots")
-    ap.add_argument("--rows", default="10000,50000,100000,300000,500000,1000000", help="Comma-separated list of row counts")
-    ap.add_argument("--widths", default="16,32,64,128,256,512,1024", help="Comma-separated list of row widths in bytes")
+    ap.add_argument("--rows", default="10000,25000,50000,75000,100000,200000,400000,600000,800000,1000000", help="Comma-separated list of row counts (default 10 points)")
+    ap.add_argument("--widths", default="16,24,32,48,64,80,96,128,256,1024", help="Comma-separated list of row widths in bytes (default 10 points)")
     ap.add_argument("--mode", default=os.environ.get("MODE", "INTERPRETER"), help="Execution mode: INTERPRETER or COMPILER")
     ap.add_argument("--build-dir", default=str(DEFAULT_BUILD_DIR))
     ap.add_argument("--data-dir", default=str(DEFAULT_TEST_DATA))
     ap.add_argument("--work-root", default=None, help="Working root directory; defaults to <build>/bench_store_overhead_matrix")
     ap.add_argument("--repeats", type=int, default=1, help="Repeats per point for averaging")
     ap.add_argument("--warmup", type=int, default=0, help="Warmup runs per point (discarded)")
+    ap.add_argument("--store-backends", default="POSIX", help="Comma-separated backends: POSIX,IO_URING")
+    ap.add_argument("--flush-on-close", default="false,true", help="Comma-separated booleans for FLUSH_ON_CLOSE (e.g., false,true)")
+    ap.add_argument("--chunk-min-bytes", default=None, help="Optional CHUNK_MIN_BYTES to inject into the Store config (e.g., 262144)")
     ap.add_argument("--no-build", action="store_true", help="Skip building systest target")
     args = ap.parse_args()
 
@@ -322,49 +352,65 @@ def main():
 
     rows_list = [int(x.strip()) for x in args.rows.split(",") if x.strip()]
     widths_list = [int(x.strip()) for x in args.widths.split(",") if x.strip()]
+    backends = [x.strip().upper() for x in args.store_backends.split(",") if x.strip()]
+    foc_values = []
+    for x in args.flush_on_close.split(","):
+        x = x.strip().lower()
+        if not x:
+            continue
+        if x in ("true", "1", "yes", "y"):
+            foc_values.append(True)
+        elif x in ("false", "0", "no", "n"):
+            foc_values.append(False)
+    if not foc_values:
+        foc_values = [False]
 
-    csv_path = work_root / "overheads.csv"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = work_root / f"overheads_{ts}.csv"
     with open(csv_path, "w", newline="") as cf:
         writer = csv.writer(cf)
-        writer.writerow(["rows", "width_bytes", "baseline_time_s", "store_time_s", "delta_s", "overhead_pct", "baseline_tps", "store_tps"])  # header
+        writer.writerow(["rows", "width_bytes", "backend", "flush_on_close", "baseline_time_s", "store_time_s", "delta_s", "overhead_pct", "baseline_tps", "store_tps"])  # header
 
         for rows in rows_list:
             for width in widths_list:
                 case_dir = work_root / f"rows_{rows}_w_{width}"
                 case_dir.mkdir(parents=True, exist_ok=True)
-                test_path = case_dir / "StoreOverheadGenAuto.test"
-                test_content = make_test_content(rows, width)
-                test_path.write_text(test_content)
+                for backend in backends:
+                    for foc in foc_values:
+                        test_path = case_dir / f"StoreOverheadGenAuto_{backend}_foc_{str(foc).lower()}.test"
+                        cm = int(args.chunk_min_bytes) if args.chunk_min_bytes else None
+                        test_content = make_test_content(rows, width, backend, foc, cm)
+                        test_path.write_text(test_content)
 
-                # Warmups
-                for _ in range(args.warmup):
-                    _ = run_systest_benchmark(build_dir, test_path, data_dir, case_dir / "warmup", args.mode)
+                        # Warmups
+                        for _ in range(args.warmup):
+                            _ = run_systest_benchmark(build_dir, test_path, data_dir, case_dir / f"warmup_{backend}_foc_{str(foc).lower()}", args.mode)
 
-                bt_list = []
-                st_list = []
-                oh_list = []
-                dt_list = []
-                for r in range(args.repeats):
-                    res_json = run_systest_benchmark(build_dir, test_path, data_dir, case_dir / f"run_{r}", args.mode)
-                    bt, st, delta, overhead_pct, _ = summarize_results(res_json)
-                    bt_list.append(bt)
-                    st_list.append(st)
-                    dt_list.append(delta)
-                    oh_list.append(overhead_pct)
+                        bt_list = []
+                        st_list = []
+                        oh_list = []
+                        dt_list = []
+                        for r in range(args.repeats):
+                            res_json = run_systest_benchmark(build_dir, test_path, data_dir, case_dir / f"run_{backend}_foc_{str(foc).lower()}_{r}", args.mode)
+                            bt, st, delta, overhead_pct, _ = summarize_results(res_json)
+                            bt_list.append(bt)
+                            st_list.append(st)
+                            dt_list.append(delta)
+                            oh_list.append(overhead_pct)
 
-                # Average over repeats
-                bt_avg = sum(bt_list) / len(bt_list)
-                st_avg = sum(st_list) / len(st_list)
-                dt_avg = sum(dt_list) / len(dt_list)
-                oh_avg = sum(oh_list) / len(oh_list)
+                        # Average over repeats
+                        bt_avg = sum(bt_list) / len(bt_list)
+                        st_avg = sum(st_list) / len(st_list)
+                        dt_avg = sum(dt_list) / len(dt_list)
+                        oh_avg = sum(oh_list) / len(oh_list)
 
-                b_tps = (rows / bt_avg) if bt_avg > 0 else float("nan")
-                s_tps = (rows / st_avg) if st_avg > 0 else float("nan")
-                writer.writerow([rows, width, f"{bt_avg:.6f}", f"{st_avg:.6f}", f"{dt_avg:.6f}", f"{oh_avg:.4f}", f"{b_tps:.1f}", f"{s_tps:.1f}"])
-                print(f"[done] rows={rows} width={width}B -> overhead={oh_avg:.2f}% (baseline={bt_avg:.3f}s, store={st_avg:.3f}s, b_tps={b_tps:.0f}, s_tps={s_tps:.0f})")
+                        b_tps = (rows / bt_avg) if bt_avg > 0 else float("nan")
+                        s_tps = (rows / st_avg) if st_avg > 0 else float("nan")
+                        writer.writerow([rows, width, backend, str(foc), f"{bt_avg:.6f}", f"{st_avg:.6f}", f"{dt_avg:.6f}", f"{oh_avg:.4f}", f"{b_tps:.1f}", f"{s_tps:.1f}"])
+                        print(f"[done] backend={backend} foc={foc} cm={args.chunk_min_bytes or 'default'} rows={rows} width={width}B -> overhead={oh_avg:.2f}% (baseline={bt_avg:.3f}s, store={st_avg:.3f}s, b_tps={b_tps:.0f}, s_tps={s_tps:.0f})")
 
     # Try to produce plots (matplotlib or fallback SVG)
-    plot_csv(csv_path, work_root)
+    plot_csv(csv_path, work_root, title_suffix=f" [{ts}]", name_suffix=ts)
 
 
 if __name__ == "__main__":
