@@ -16,6 +16,8 @@
 #include <ScanPhysicalOperator.hpp>
 
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -53,6 +55,15 @@ void ScanPhysicalOperator::setup(ExecutionContext& executionCtx, CompilationCont
 
     auto inputFormatterBufferRef = std::dynamic_pointer_cast<InputFormatterTupleBufferRef>(bufferRef);
     INVARIANT(inputFormatterBufferRef != nullptr, "Raw scan expected InputFormatterTupleBufferRef");
+    if (const char* debugFormatter = std::getenv("NES_INPUT_FORMATTER_DEBUG"); debugFormatter && *debugFormatter)
+    {
+        std::cerr << "formatter-debug scan-setup hasSourceId=" << rawScanSourceId.has_value();
+        if (rawScanSourceId.has_value())
+        {
+            std::cerr << " sourceId=" << rawScanSourceId->getRawValue();
+        }
+        std::cerr << " scan=" << reinterpret_cast<uintptr_t>(this) << '\n';
+    }
     if (rawScanSourceId.has_value())
     {
         inputFormatterBufferRef->bindSourceId(*rawScanSourceId);

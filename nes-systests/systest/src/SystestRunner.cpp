@@ -332,8 +332,6 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
     nlohmann::json& resultJson,
     SystestProgressTracker& progressTracker)
 {
-    auto worker = std::make_unique<EmbeddedWorkerQueryManager>(configuration);
-    QuerySubmitter submitter(std::move(worker));
     std::vector<std::shared_ptr<RunningQuery>> ranQueries;
     progressTracker.reset();
     progressTracker.setTotalQueries(queries.size());
@@ -345,6 +343,9 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
             continue;
         }
 
+        auto worker = std::make_unique<EmbeddedWorkerQueryManager>(configuration);
+        QuerySubmitter submitter(std::move(worker));
+
         const auto registrationResult = submitter.registerQuery(queryToRun.planInfoOrException.value().queryPlan);
         if (not registrationResult.has_value())
         {
@@ -352,12 +353,18 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
             continue;
         }
         auto queryId = registrationResult.value();
-
         auto runningQueryPtr = std::make_shared<RunningQuery>(queryToRun, queryId);
         runningQueryPtr->passed = false;
         ranQueries.emplace_back(runningQueryPtr);
         submitter.startQuery(queryId);
-        const auto summary = submitter.finishedQueries().at(0);
+        const auto summaries = submitter.finishedQueries();
+        const auto summaryIt = std::ranges::find(summaries, queryId, &LocalQueryStatus::queryId);
+        if (summaryIt == summaries.end())
+        {
+            NES_ERROR("Query {} did not produce a completion summary.", queryId);
+            continue;
+        }
+        const auto& summary = *summaryIt;
 
         if (summary.state == QueryState::Failed)
         {
