@@ -1,0 +1,162 @@
+diff --git a/nautilus/src/nautilus/compiler/JITCompiler.cpp b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+index efab105..598ef21 100644
+--- a/nautilus/src/nautilus/compiler/JITCompiler.cpp
++++ b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+@@ -8,13 +8,16 @@
+ #include <chrono>
+ #include <cstdint>
+ #include <filesystem>
++#include <fstream>
+ #include <fmt/chrono.h>
+ #include <fmt/core.h>
+ #include <iomanip>
++#include <optional>
+ #include <random>
+ #include <sstream>
+ #include <string>
+ #include <string_view>
++#include <thread>
+ 
+ #ifdef ENABLE_COMPILER
+ 
+@@ -104,6 +107,79 @@ std::filesystem::path getBlobCachePathForExplicitKey(const std::filesystem::path
+ 	return cacheRoot / (hex64(hash) + ".mlirbc");
+ }
+ 
++std::filesystem::path getBlobConstPointerMetadataPath(const std::filesystem::path& blobPath) {
++	auto metadataPath = blobPath;
++	metadataPath += ".constptr";
++	return metadataPath;
++}
++
++std::optional<bool> tryReadBlobConstPointerMetadata(const std::filesystem::path& blobPath) {
++	const auto metadataPath = getBlobConstPointerMetadataPath(blobPath);
++	if (!std::filesystem::exists(metadataPath)) {
++		return std::nullopt;
++	}
++	std::ifstream input(metadataPath.string(), std::ios::binary);
++	if (!input.is_open()) {
++		return std::nullopt;
++	}
++	char marker = 0;
++	input >> marker;
++	if (marker == '1') {
++		return true;
++	}
++	if (marker == '0') {
++		return false;
++	}
++	return std::nullopt;
++}
++
++void writeBlobConstPointerMetadata(const std::filesystem::path& blobPath, const bool hasConstPointers) {
++	const auto metadataPath = getBlobConstPointerMetadataPath(blobPath);
++	const auto metadataDir = metadataPath.parent_path();
++	if (!metadataDir.empty()) {
++		std::error_code ec;
++		std::filesystem::create_directories(metadataDir, ec);
++	}
++
++	auto tmpPath = metadataPath;
++	const auto uniqueSuffix =
++	    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "."
++	    + std::to_string(std::hash<std::thread::id> {}(std::this_thread::get_id()));
++	tmpPath += ".tmp." + uniqueSuffix;
++
++	std::ofstream output(tmpPath.string(), std::ios::binary);
++	if (!output.is_open()) {
++		return;
++	}
++	output << (hasConstPointers ? "1\n" : "0\n");
++	if (!output.good()) {
++		output.close();
++		std::error_code cleanupEc;
++		std::filesystem::remove(tmpPath, cleanupEc);
++		return;
++	}
++	output.close();
++
++	std::error_code renameEc;
++	std::filesystem::rename(tmpPath, metadataPath, renameEc);
++	if (renameEc) {
++		std::error_code cleanupEc;
++		std::filesystem::remove(tmpPath, cleanupEc);
++	}
++}
++
++bool hasConstPointerLiterals(const std::shared_ptr<ir::IRGraph>& irGraph) {
++	const auto& rootOperation = irGraph->getRootOperation();
++	for (const auto& basicBlock : rootOperation.getBasicBlocks()) {
++		for (const auto& operation : basicBlock->getOperations()) {
++			if (operation->dynCast<ir::ConstPtrOperation>() != nullptr) {
++				return true;
++			}
++		}
++	}
++	return false;
++}
++
+ void fnv1a64AppendConstPointerLiterals(uint64_t& hash, const std::shared_ptr<ir::IRGraph>& irGraph) {
+ 	const auto& rootOperation = irGraph->getRootOperation();
+ 	for (const auto& basicBlock : rootOperation.getBasicBlocks()) {
+@@ -167,6 +243,7 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 	const bool cacheEnabled = (!cacheDir.empty() && blobMode == "off" && backendName == "mlir");
+ 	const bool skipTraceOnHit = options.getOptionOrDefault("engine.Blob.SkipTraceOnHit", true);
+ 	const auto explicitCacheKey = options.getOptionOrDefault<std::string>("engine.Blob.CacheKey", std::string {});
++	std::optional<std::filesystem::path> explicitBlobPath;
+ 
+ 	if (cacheEnabled && !explicitCacheKey.empty()) {
+ 		std::error_code ec;
+@@ -174,17 +251,24 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 		std::filesystem::create_directories(cacheRoot, ec);
+ 		if (!ec) {
+ 			auto blobPath = getBlobCachePathForExplicitKey(cacheRoot, backendName, options, explicitCacheKey);
++			explicitBlobPath = blobPath;
+ 			if (std::filesystem::exists(blobPath)) {
+-				setBlobLoadOptions(compileOptions, blobPath);
+-				if (skipTraceOnHit) {
+-					try {
+-						auto executable = backend->compile(std::shared_ptr<ir::IRGraph> {}, dumpHandler, compileOptions);
+-						executable->setGeneratedFiles(dumpHandler.getGeneratedFiles());
+-						return executable;
+-					} catch (const std::exception& e) {
+-						log::debug("Could not load explicit cache hit without tracing ({}); recompiling", e.what());
+-						setBlobEmitOptions(compileOptions, blobPath);
++				const auto hasConstPointers = tryReadBlobConstPointerMetadata(blobPath);
++				const bool safeToLoadWithoutReTracing = hasConstPointers.has_value() && !*hasConstPointers;
++				if (safeToLoadWithoutReTracing) {
++					setBlobLoadOptions(compileOptions, blobPath);
++					if (skipTraceOnHit) {
++						try {
++							auto executable = backend->compile(std::shared_ptr<ir::IRGraph> {}, dumpHandler, compileOptions);
++							executable->setGeneratedFiles(dumpHandler.getGeneratedFiles());
++							return executable;
++						} catch (const std::exception& e) {
++							log::debug("Could not load explicit cache hit without tracing ({}); recompiling", e.what());
++							setBlobEmitOptions(compileOptions, blobPath);
++						}
+ 					}
++				} else {
++					setBlobEmitOptions(compileOptions, blobPath);
+ 				}
+ 			} else {
+ 				setBlobEmitOptions(compileOptions, blobPath);
+@@ -210,6 +294,7 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 	if (cacheEnabled || dumpAll) {
+ 		irText = ir->toString();
+ 	}
++	const bool irContainsConstPointers = hasConstPointerLiterals(ir);
+ 
+ 	dumpHandler.dump("after_ir_creation", "ir", [&]() { return irText.empty() ? ir->toString() : irText; });
+ 
+@@ -241,6 +326,10 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 	}
+ 	// lower to backend
+ 	auto executable = backend->compile(ir, dumpHandler, compileOptions);
++	if (explicitBlobPath.has_value()
++	    && compileOptions.getOptionOrDefault<std::string>("engine.Blob.Mode", std::string("off")) == "emit") {
++		writeBlobConstPointerMetadata(*explicitBlobPath, irContainsConstPointers);
++	}
+ 	executable->setGeneratedFiles(dumpHandler.getGeneratedFiles());
+ 	return executable;
+ }

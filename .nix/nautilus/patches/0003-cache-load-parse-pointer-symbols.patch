@@ -1,0 +1,35 @@
+diff --git a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+index 034c594..df5476e 100644
+--- a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
++++ b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+@@ -13,6 +13,8 @@
+ #include "nautilus/compiler/backends/mlir/intrinsics/MLIRMemoryIntrinsics.hpp"
+ #include "nautilus/compiler/ir/IRGraph.hpp"
+ #include <cstdint>
++#include <cerrno>
++#include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
+ #include <llvm/ADT/SmallVector.h>
+@@ -127,11 +129,21 @@ std::unique_ptr<Executable> MLIRCompilationBackend::compile(const std::shared_pt
+ 				}
+ 				auto name = fn.getName().str();
+ 				void* addr = nullptr;
++				if (name.size() > 2 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
++					char* end = nullptr;
++					errno = 0;
++					const auto parsed = std::strtoull(name.c_str(), &end, 16);
++					if (errno == 0 && end != name.c_str() && *end == '\0') {
++						addr = reinterpret_cast<void*>(static_cast<uintptr_t>(parsed));
++					}
++				}
++				if (addr == nullptr) {
+ 				try {
+ 					addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(name);
+ 				} catch (...) {
+ 					addr = nullptr;
+ 				}
++				}
+ 				if (addr == nullptr) {
+ 					addr = proxyFunctions.getProxyFunctionAddress(name);
+ 				}

@@ -99,8 +99,7 @@ NLJProbePhysicalOperator::NLJProbePhysicalOperator(
     , rightMemoryProvider(std::move(rightMemoryProvider))
     , leftKeyFieldNames(std::move(leftKeyFieldNames))
     , rightKeyFieldNames(std::move(rightKeyFieldNames))
-{
-}
+{ }
 
 void NLJProbePhysicalOperator::performNLJ(
     const PagedVectorRef& outerPagedVector,

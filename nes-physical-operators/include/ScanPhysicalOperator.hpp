@@ -30,8 +30,12 @@ namespace NES
 class ScanPhysicalOperator final : public PhysicalOperatorConcept
 {
 public:
-    explicit ScanPhysicalOperator(std::shared_ptr<TupleBufferRef> bufferRef, std::vector<Record::RecordFieldIdentifier> projections);
+    explicit ScanPhysicalOperator(
+        std::shared_ptr<TupleBufferRef> bufferRef,
+        std::vector<Record::RecordFieldIdentifier> projections,
+        std::optional<OriginId> rawScanSourceId = std::nullopt);
 
+    void setup(ExecutionContext& executionCtx, CompilationContext& compilationContext) const override;
     void open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const override;
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override;
     void setChild(PhysicalOperator child) override;
@@ -41,6 +45,7 @@ private:
     std::vector<Record::RecordFieldIdentifier> projections;
     std::optional<PhysicalOperator> child;
     bool isRawScan = false;
+    std::optional<OriginId> rawScanSourceId;
 
     void rawScan(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const;
 };

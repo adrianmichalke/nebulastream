@@ -219,8 +219,7 @@ uint64_t TupleBufferRef::getTupleSize() const
 
 TupleBufferRef::TupleBufferRef(const uint64_t capacity, const uint64_t bufferSize, const uint64_t tupleSize)
     : capacity(capacity), bufferSize(bufferSize), tupleSize(tupleSize)
-{
-}
+{ }
 
 TupleBufferRef::~TupleBufferRef() = default;
 }

@@ -64,6 +64,13 @@ let
     src = nautilusSrc;
     patches = [
       ./patches/0001-disable-ubsan-function-call-check.patch
+      ./patches/0002-mlir-blob-capture.patch
+      ./patches/0003-cache-load-parse-pointer-symbols.patch
+      ./patches/0004-cache-load-rebuild-proxy-symbol-map.patch
+      ./patches/0005-cache-key-include-const-pointers.patch
+      ./patches/0006-cache-hotpath-and-race-fixes.patch
+      ./patches/0010-constptr-relocation-skip-trace.patch
+      ./patches/0011-explicit-cache-key-compile-ordinal.patch
     ];
 
     nativeBuildInputs = [

@@ -1,0 +1,33 @@
+diff --git a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+index df5476e..f45fa2f 100644
+--- a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
++++ b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+@@ -162,16 +162,19 @@ std::unique_ptr<Executable> MLIRCompilationBackend::compile(const std::shared_pt
+ 		}
+ 	}
+ 
+-	std::unique_ptr<MLIRLoweringProvider> loweringProvider;
+-	if (!loadedFromBlob) {
+-		loweringProvider = std::make_unique<MLIRLoweringProvider>(context, options, intrinsicManager);
+-		mlirModule = loweringProvider->generateModuleFromIR(ir);
+-		if (*mlirModule == nullptr) {
+-			throw RuntimeException("verification of MLIR module failed!");
+-		};
++	auto loweringProvider = std::make_unique<MLIRLoweringProvider>(context, options, intrinsicManager);
++	auto loweredMlirModule = loweringProvider->generateModuleFromIR(ir);
++	if (*loweredMlirModule == nullptr) {
++		throw RuntimeException("verification of MLIR module failed!");
++	};
++
++	// Recreate the exact runtime symbol map from IR lowering, even when loading
++	// a cached MLIR blob. Some proxy symbols are not discoverable via dlsym.
++	jitProxyFunctionSymbols = loweringProvider->getJitProxyFunctionSymbols();
++	jitProxyTargetAddresses = loweringProvider->getJitProxyTargetAddresses();
+ 
+-		jitProxyFunctionSymbols = loweringProvider->getJitProxyFunctionSymbols();
+-		jitProxyTargetAddresses = loweringProvider->getJitProxyTargetAddresses();
++	if (!loadedFromBlob) {
++		mlirModule = std::move(loweredMlirModule);
+ 	}
+ 
+ 	// 2.a dump MLIR to console or a file

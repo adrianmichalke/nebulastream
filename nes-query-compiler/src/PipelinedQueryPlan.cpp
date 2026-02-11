@@ -19,6 +19,7 @@
 #include <ostream>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Util/ExecutionMode.hpp>
@@ -27,7 +28,10 @@
 namespace NES
 {
 
-PipelinedQueryPlan::PipelinedQueryPlan(QueryId id, ExecutionMode executionMode) : queryId(id), executionMode(executionMode) { };
+PipelinedQueryPlan::PipelinedQueryPlan(QueryId id, ExecutionMode executionMode, std::string cacheKeySeed)
+    : queryId(id), executionMode(executionMode), cacheKeySeed(std::move(cacheKeySeed))
+{
+}
 
 static void printPipeline(const Pipeline* pipeline, std::ostream& os, int indentLevel)
 {
@@ -69,6 +73,11 @@ QueryId PipelinedQueryPlan::getQueryId() const
 ExecutionMode PipelinedQueryPlan::getExecutionMode() const
 {
     return executionMode;
+}
+
+const std::string& PipelinedQueryPlan::getCacheKeySeed() const
+{
+    return cacheKeySeed;
 }
 
 const std::vector<std::shared_ptr<Pipeline>>& PipelinedQueryPlan::getPipelines() const

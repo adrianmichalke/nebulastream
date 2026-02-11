@@ -30,22 +30,18 @@
 
 namespace NES
 {
-class AggregationBuildPhysicalOperator;
 HashMap* getAggHashMapProxy(
     const AggregationOperatorHandler* operatorHandler,
     Timestamp timestamp,
     WorkerThreadId workerThreadId,
-    const AggregationBuildPhysicalOperator* buildOperator);
+    uint64_t keySize,
+    uint64_t valueSize,
+    uint64_t pageSize,
+    uint64_t numberOfBuckets);
 
 class AggregationBuildPhysicalOperator final : public WindowBuildPhysicalOperator
 {
 public:
-    friend HashMap* getAggHashMapProxy(
-        const AggregationOperatorHandler* operatorHandler,
-        Timestamp timestamp,
-        WorkerThreadId workerThreadId,
-        const AggregationBuildPhysicalOperator* buildOperator);
-
     AggregationBuildPhysicalOperator(
         OperatorHandlerId operatorHandlerId,
         std::unique_ptr<TimeFunction> timeFunction,

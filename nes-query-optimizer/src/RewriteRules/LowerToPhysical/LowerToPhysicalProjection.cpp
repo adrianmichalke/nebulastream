@@ -62,7 +62,9 @@ createScanOperator(const NES::LogicalOperator& projectionOp, const size_t buffer
         if (NES::toUpperCase(inputFormatterConfig.parserType) != "NATIVE")
         {
             return NES::ScanPhysicalOperator(
-                provideInputFormatterTupleBufferRef(inputFormatterConfig, memoryProvider), inputSchema.getFieldNames());
+                provideInputFormatterTupleBufferRef(inputFormatterConfig, memoryProvider),
+                inputSchema.getFieldNames(),
+                NES::OriginId(sourceOperators.front().getPhysicalSourceId().getRawValue()));
         }
     }
     return NES::ScanPhysicalOperator(memoryProvider, inputSchema.getFieldNames());

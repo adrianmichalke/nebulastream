@@ -52,8 +52,7 @@ NLJBuildPhysicalOperator::NLJBuildPhysicalOperator(
     std::unique_ptr<TimeFunction> timeFunction,
     std::shared_ptr<TupleBufferRef> bufferRef)
     : StreamJoinBuildPhysicalOperator(operatorHandlerId, joinBuildSide, std::move(timeFunction), std::move(bufferRef))
-{
-}
+{ }
 
 void NLJBuildPhysicalOperator::execute(ExecutionContext& executionCtx, Record& record) const
 {

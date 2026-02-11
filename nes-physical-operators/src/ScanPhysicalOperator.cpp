@@ -34,18 +34,37 @@ namespace NES
 {
 
 ScanPhysicalOperator::ScanPhysicalOperator(
-    std::shared_ptr<TupleBufferRef> bufferRef, std::vector<Record::RecordFieldIdentifier> projections)
+    std::shared_ptr<TupleBufferRef> bufferRef,
+    std::vector<Record::RecordFieldIdentifier> projections,
+    std::optional<OriginId> rawScanSourceId)
     : bufferRef(std::move(bufferRef))
     , projections(std::move(projections))
     , isRawScan(std::dynamic_pointer_cast<InputFormatterTupleBufferRef>(this->bufferRef) != nullptr)
+    , rawScanSourceId(isRawScan ? rawScanSourceId : std::nullopt)
+{ }
+
+void ScanPhysicalOperator::setup(ExecutionContext& executionCtx, CompilationContext& compilationContext) const
 {
+    if (!isRawScan)
+    {
+        setupChild(executionCtx, compilationContext);
+        return;
+    }
+
+    auto inputFormatterBufferRef = std::dynamic_pointer_cast<InputFormatterTupleBufferRef>(bufferRef);
+    INVARIANT(inputFormatterBufferRef != nullptr, "Raw scan expected InputFormatterTupleBufferRef");
+    if (rawScanSourceId.has_value())
+    {
+        inputFormatterBufferRef->bindSourceId(*rawScanSourceId);
+    }
+    setupChild(executionCtx, compilationContext);
 }
 
 void ScanPhysicalOperator::rawScan(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const
 {
     auto inputFormatterBufferRef = std::dynamic_pointer_cast<InputFormatterTupleBufferRef>(this->bufferRef);
 
-    if (not inputFormatterBufferRef->indexBuffer(recordBuffer, executionCtx.pipelineMemoryProvider.arena))
+    if (not inputFormatterBufferRef->indexBuffer(recordBuffer, executionCtx.pipelineMemoryProvider.arena, executionCtx.originId))
     {
         executionCtx.setOpenReturnState(OpenReturnState::REPEAT);
         return;
@@ -56,7 +75,7 @@ void ScanPhysicalOperator::rawScan(ExecutionContext& executionCtx, RecordBuffer&
 
     /// process buffer
     const auto executeChildLambda = [this](ExecutionContext& executionCtx, Record& record) { executeChild(executionCtx, record); };
-    inputFormatterBufferRef->readBuffer(executionCtx, recordBuffer, executeChildLambda);
+    inputFormatterBufferRef->readBuffer(executionCtx, recordBuffer, executeChildLambda, executionCtx.originId);
 }
 
 void ScanPhysicalOperator::open(ExecutionContext& executionCtx, RecordBuffer& recordBuffer) const

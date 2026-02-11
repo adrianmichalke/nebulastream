@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <DataTypes/DataType.hpp>
+#include <Identifiers/Identifiers.hpp>
 #include <Nautilus/Interface/BufferRef/TupleBufferRef.hpp>
 #include <Nautilus/Interface/Record.hpp>
 #include <Nautilus/Interface/RecordBuffer.hpp>
@@ -73,7 +74,11 @@ public:
         std::unreachable();
     }
 
-    void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const;
+    void readBuffer(
+        ExecutionContext& executionCtx,
+        const RecordBuffer& recordBuffer,
+        const ExecuteChildFn& executeChild,
+        const nautilus::val<OriginId>& sourceId) const;
 
     void
     writeRecord(nautilus::val<uint64_t>&, const RecordBuffer&, const Record&, const nautilus::val<AbstractBufferProvider*>&) const override
@@ -82,7 +87,10 @@ public:
         std::unreachable();
     }
 
-    nautilus::val<bool> indexBuffer(RecordBuffer& recordBuffer, ArenaRef& arenaRef) const;
+    nautilus::val<bool>
+    indexBuffer(RecordBuffer& recordBuffer, ArenaRef& arenaRef, const nautilus::val<OriginId>& sourceId) const;
+
+    void bindSourceId(OriginId sourceId) const;
 
     friend std::ostream& operator<<(std::ostream& os, const InputFormatterTupleBufferRef& inputFormatterTupleBufferRef);
 
@@ -90,9 +98,15 @@ public:
     struct InputFormatterConcept
     {
         virtual ~InputFormatterConcept() = default;
-        virtual void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const
+        virtual void readBuffer(
+            ExecutionContext& executionCtx,
+            const RecordBuffer& recordBuffer,
+            const ExecuteChildFn& executeChild,
+            const nautilus::val<OriginId>& sourceId) const
             = 0;
-        virtual nautilus::val<bool> indexBuffer(RecordBuffer&, ArenaRef&) const = 0;
+        virtual nautilus::val<bool>
+        indexBuffer(RecordBuffer&, ArenaRef&, const nautilus::val<OriginId>& sourceId) const = 0;
+        virtual void bindSourceId(OriginId sourceId) const = 0;
         virtual std::ostream& toString(std::ostream& os) const = 0;
     };
 
@@ -102,16 +116,26 @@ public:
     {
         explicit InputFormatterModel(T&& inputFormatter) : InputFormatter(std::move(inputFormatter)) { }
 
-        nautilus::val<bool> indexBuffer(RecordBuffer& recordBuffer, ArenaRef& arena) const override
+        nautilus::val<bool>
+        indexBuffer(RecordBuffer& recordBuffer, ArenaRef& arena, const nautilus::val<OriginId>& sourceId) const override
         {
-            return InputFormatter.indexBuffer(recordBuffer, arena);
+            return InputFormatter.indexBuffer(recordBuffer, arena, sourceId);
+        }
+
+        void bindSourceId(OriginId sourceId) const override
+        {
+            InputFormatter.bindSourceId(sourceId);
         }
 
         std::ostream& toString(std::ostream& os) const override { return InputFormatter.toString(os); }
 
-        void readBuffer(ExecutionContext& executionCtx, const RecordBuffer& recordBuffer, const ExecuteChildFn& executeChild) const override
+        void readBuffer(
+            ExecutionContext& executionCtx,
+            const RecordBuffer& recordBuffer,
+            const ExecuteChildFn& executeChild,
+            const nautilus::val<OriginId>& sourceId) const override
         {
-            return InputFormatter.readBuffer(executionCtx, recordBuffer, executeChild);
+            return InputFormatter.readBuffer(executionCtx, recordBuffer, executeChild, sourceId);
         }
 
     private:

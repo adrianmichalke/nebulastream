@@ -22,10 +22,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <ostream>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -115,16 +118,25 @@ public:
     InputFormatter(InputFormatter&&) = default;
     InputFormatter& operator=(InputFormatter&&) = delete;
 
+    void bindSourceId(const OriginId sourceId) const
+    {
+        auto& formatterRegistry = getFormatterRegistry();
+        auto& formatterRegistryMutex = getFormatterRegistryMutex();
+        std::unique_lock lock(formatterRegistryMutex);
+        formatterRegistry[sourceId.getRawValue()] = const_cast<InputFormatter*>(this);
+    }
+
     /// Executes the first phase, which indexes a (raw) buffer enabling the second phase, which calls 'readBuffer()' to index specific
     /// records/fields within the (raw) buffer. Relies on static thread_local member variables to 'bridge' the result of the indexing phase
     /// to the second phase, which uses the index to access specific records/fields
-    [[nodiscard]] nautilus::val<bool> indexBuffer(const RecordBuffer& recordBuffer, const ArenaRef& arenaRef) const
+    [[nodiscard]] nautilus::val<bool>
+    indexBuffer(const RecordBuffer& recordBuffer, const ArenaRef& arenaRef, const nautilus::val<OriginId>& sourceId) const
     {
         /// index raw tuple buffer, resolve and index spanning tuples(SequenceShredder) and return pointers to resolved spanning tuples, if exist
         const auto tlIndexPhaseResultNautilusVal = std::make_unique<nautilus::val<IndexPhaseResult*>>(invoke(
             indexLeadingSpanningTupleAndBufferProxy,
             recordBuffer.getReference(),
-            nautilus::val<const InputFormatter*>(this),
+            sourceId,
             arenaRef.getArena()));
 
         if (/* isRepeat */ *getMemberWithOffset<bool>(*tlIndexPhaseResultNautilusVal, offsetof(IndexPhaseResult, isRepeat)))
@@ -140,7 +152,8 @@ public:
     void readBuffer(
         ExecutionContext& executionCtx,
         const RecordBuffer& recordBuffer,
-        const std::function<void(ExecutionContext& executionCtx, Record& record)>& executeChild) const
+        const std::function<void(ExecutionContext& executionCtx, Record& record)>& executeChild,
+        const nautilus::val<OriginId>& sourceId) const
     {
         /// @Note: the order below is important
         const nautilus::val<IndexPhaseResult*> indexPhaseResult = nautilus::invoke(getIndexPhaseResultProxy);
@@ -163,7 +176,7 @@ public:
 
         /// a buffer that delimits tuples usually forms a spanning tuple that continues in the next buffer
         /// determining the offset of the start of that tuple may require parsing all prior records in the raw buffer
-        parseTrailingRecord(executionCtx, recordBuffer, executeChild, indexPhaseResult);
+        parseTrailingRecord(executionCtx, recordBuffer, executeChild, indexPhaseResult, sourceId);
     }
 
     std::ostream& toString(std::ostream& os) const
@@ -174,6 +187,30 @@ public:
     }
 
 private:
+    static std::unordered_map<uint64_t, InputFormatter*>& getFormatterRegistry()
+    {
+        static std::unordered_map<uint64_t, InputFormatter*> formatterRegistry;
+        return formatterRegistry;
+    }
+
+    static std::shared_mutex& getFormatterRegistryMutex()
+    {
+        static std::shared_mutex formatterRegistryMutex;
+        return formatterRegistryMutex;
+    }
+
+    static InputFormatter* getFormatterForSourceId(const OriginId sourceId)
+    {
+        auto& formatterRegistry = getFormatterRegistry();
+        auto& formatterRegistryMutex = getFormatterRegistryMutex();
+        std::shared_lock lock(formatterRegistryMutex);
+        if (const auto formatter = formatterRegistry.find(sourceId.getRawValue()); formatter != formatterRegistry.end())
+        {
+            return formatter->second;
+        }
+        return nullptr;
+    }
+
     FormatterType inputFormatIndexer;
     typename FormatterType::IndexerMetaData indexerMetaData;
     std::vector<Record::RecordFieldIdentifier> projections;
@@ -312,8 +349,11 @@ private:
 
     static IndexPhaseResult* getIndexPhaseResultProxy() { return &tlIndexPhaseResult; }
 
-    static bool indexTrailingSpanningTupleProxy(const TupleBuffer* tupleBuffer, const InputFormatter* inputFormatter, Arena* arenaRef)
+    static bool indexTrailingSpanningTupleProxy(const TupleBuffer* tupleBuffer, const OriginId sourceId, Arena* arenaRef)
     {
+        auto* inputFormatter = getFormatterForSourceId(sourceId);
+        PRECONDITION(inputFormatter != nullptr, "Cannot resolve InputFormatter for source id {}", sourceId);
+
         /// the buffer does not have a trailing SpanningTuple, if after iterating over the entire buffer, getByteOffsetOfLastTuple is invalid
         const auto offsetOfLastTupleDelimiter = tlIndexPhaseResult.rawBufferFIF.getByteOffsetOfLastTuple();
         if (offsetOfLastTupleDelimiter == std::numeric_limits<uint64_t>::max())
@@ -337,8 +377,11 @@ private:
     }
 
     static IndexPhaseResult*
-    indexLeadingSpanningTupleAndBufferProxy(const TupleBuffer* tupleBuffer, InputFormatter* inputFormatter, Arena* arenaRef)
+    indexLeadingSpanningTupleAndBufferProxy(const TupleBuffer* tupleBuffer, const OriginId sourceId, Arena* arenaRef)
     {
+        auto* inputFormatter = getFormatterForSourceId(sourceId);
+        PRECONDITION(inputFormatter != nullptr, "Cannot resolve InputFormatter for source id {}", sourceId);
+
         IndexPhaseResultBuilder::startBuildingIndex();
         const auto [offsetOfFirstTupleDelimiter, offsetOfLastTupleDelimiter, hasTupleDelimiter]
             = IndexPhaseResultBuilder::indexRawBuffer(*inputFormatter, *tupleBuffer);
@@ -435,12 +478,13 @@ private:
         ExecutionContext& executionCtx,
         const RecordBuffer& recordBuffer,
         const std::function<void(ExecutionContext& executionCtx, Record& record)>& executeChild,
-        const nautilus::val<IndexPhaseResult*>& indexPhaseResult) const
+        const nautilus::val<IndexPhaseResult*>& indexPhaseResult,
+        const nautilus::val<OriginId>& sourceId) const
     {
         const nautilus::val<bool> hasTrailingSpanningTuple = invoke(
             indexTrailingSpanningTupleProxy,
             recordBuffer.getReference(),
-            nautilus::val<const InputFormatter*>(this),
+            sourceId,
             executionCtx.pipelineMemoryProvider.arena.getArena());
 
         if (hasTrailingSpanningTuple)

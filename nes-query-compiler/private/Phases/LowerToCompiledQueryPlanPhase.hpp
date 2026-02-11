@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <variant>
@@ -44,6 +45,7 @@ private:
     void processSink(const Predecessor& predecessor, const std::shared_ptr<Pipeline>& pipeline);
     Successor processSuccessor(const Predecessor& predecessor, const std::shared_ptr<Pipeline>& pipeline);
     void processSource(const std::shared_ptr<Pipeline>& pipeline);
+    [[nodiscard]] uint64_t getStablePipelineCacheOrdinal(const std::shared_ptr<Pipeline>& pipeline);
 
     std::unique_ptr<ExecutablePipelineStage> getStage(const std::shared_ptr<Pipeline>& pipeline);
 
@@ -51,6 +53,8 @@ private:
     std::vector<CompiledQueryPlan::Sink> sinks;
     std::vector<CompiledQueryPlan::Source> sources;
     std::unordered_map<PipelineId, std::shared_ptr<ExecutablePipeline>> pipelineToExecutableMap;
+    std::unordered_map<const Pipeline*, uint64_t> pipelineToStableCacheOrdinalMap;
+    uint64_t nextStablePipelineCacheOrdinal = 0;
 
     std::shared_ptr<PipelinedQueryPlan> pipelineQueryPlan;
 

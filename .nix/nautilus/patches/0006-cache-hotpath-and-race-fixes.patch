@@ -1,0 +1,95 @@
+diff --git a/nautilus/src/nautilus/compiler/JITCompiler.cpp b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+index d7677cf..03aea29 100644
+--- a/nautilus/src/nautilus/compiler/JITCompiler.cpp
++++ b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+@@ -47,6 +47,23 @@ std::string hex64(uint64_t value) {
+ 	return ss.str();
+ }
+ 
++enum class BlobCacheKeyMode { PointerSensitive, Stable };
++
++BlobCacheKeyMode parseBlobCacheKeyMode(const engine::Options& options) {
++	const auto mode = options.getOptionOrDefault<std::string>("engine.Blob.CacheKeyMode", std::string("ptr_sensitive"));
++	if (mode == "stable") {
++		return BlobCacheKeyMode::Stable;
++	}
++	return BlobCacheKeyMode::PointerSensitive;
++}
++
++std::string_view getBlobCacheFormatVersion(const BlobCacheKeyMode mode) {
++	if (mode == BlobCacheKeyMode::Stable) {
++		return "nautilus.mlirbc.cache.v3.stable\n";
++	}
++	return "nautilus.mlirbc.cache.v3.ptr_sensitive\n";
++}
++
+ void fnv1a64AppendConstPointerLiterals(uint64_t& hash, const std::shared_ptr<ir::IRGraph>& irGraph) {
+ 	const auto& rootOperation = irGraph->getRootOperation();
+ 	for (const auto& basicBlock : rootOperation.getBasicBlocks()) {
+@@ -133,8 +150,9 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 		std::filesystem::path cacheRoot(cacheDir);
+ 		std::filesystem::create_directories(cacheRoot, ec);
+ 		if (!ec) {
++			const auto cacheKeyMode = parseBlobCacheKeyMode(options);
+ 			uint64_t hash = kFNV1a64OffsetBasis;
+-			hash = fnv1a64Append(hash, "nautilus.mlirbc.cache.v2\n");
++			hash = fnv1a64Append(hash, getBlobCacheFormatVersion(cacheKeyMode));
+ 			hash = fnv1a64Append(hash, backendName);
+ 			hash = fnv1a64Append(hash, "\nmt=");
+ 			hash = fnv1a64Append(hash, options.getOptionOrDefault("mlir.enableMultithreading", true) ? "1" : "0");
+@@ -144,7 +162,9 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 			hash = fnv1a64Append(hash, options.getOptionOrDefault("mlir.inline_invoke_calls", false) ? "1" : "0");
+ 			hash = fnv1a64Append(hash, "\n");
+ 			hash = fnv1a64Append(hash, irText.empty() ? ir->toString() : irText);
+-			fnv1a64AppendConstPointerLiterals(hash, ir);
++			if (cacheKeyMode == BlobCacheKeyMode::PointerSensitive) {
++				fnv1a64AppendConstPointerLiterals(hash, ir);
++			}
+ 
+ 			auto blobPath = cacheRoot / (hex64(hash) + ".mlirbc");
+ 			if (std::filesystem::exists(blobPath)) {
+diff --git a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+index f45fa2f..4d2d266 100644
+--- a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
++++ b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+@@ -13,10 +13,13 @@
+ #include "nautilus/compiler/backends/mlir/intrinsics/MLIRMemoryIntrinsics.hpp"
+ #include "nautilus/compiler/ir/IRGraph.hpp"
+ #include <cstdint>
++#include <chrono>
+ #include <cerrno>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
++#include <functional>
++#include <thread>
+ #include <llvm/ADT/SmallVector.h>
+ #include <llvm/Support/DynamicLibrary.h>
+ #include <llvm/Support/MemoryBuffer.h>
+@@ -218,7 +221,9 @@ std::unique_ptr<Executable> MLIRCompilationBackend::compile(const std::shared_pt
+ 				}
+ 
+ 				auto tmpPath = blobPathFs;
+-				tmpPath += ".tmp";
++				const auto uniqueSuffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
++				                          + "." + std::to_string(std::hash<std::thread::id> {}(std::this_thread::get_id()));
++				tmpPath += ".tmp." + uniqueSuffix;
+ 				std::ofstream out(tmpPath.string(), std::ios::binary);
+ 				if (!out.is_open()) {
+ 					throw RuntimeException("Failed to open engine.Blob.Path for writing: " + tmpPath.string());
+@@ -232,7 +237,14 @@ std::unique_ptr<Executable> MLIRCompilationBackend::compile(const std::shared_pt
+ 				std::error_code ec;
+ 				std::filesystem::rename(tmpPath, blobPathFs, ec);
+ 				if (ec) {
+-					throw RuntimeException("Failed to rename MLIR bytecode cache file: " + ec.message());
++					// Another thread/process may already have published the same cache artifact.
++					// If the final file exists, treat this as benign and clean up our temp file.
++					if (std::filesystem::exists(blobPathFs)) {
++						std::error_code cleanupEc;
++						std::filesystem::remove(tmpPath, cleanupEc);
++					} else {
++						throw RuntimeException("Failed to rename MLIR bytecode cache file: " + ec.message());
++					}
+ 				}
+ 			} else if (!captureInMemory) {
+ 				throw RuntimeException(

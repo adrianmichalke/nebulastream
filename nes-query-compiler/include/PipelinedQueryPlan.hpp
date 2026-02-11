@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <ostream>
+#include <string>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Util/ExecutionMode.hpp>
@@ -34,12 +35,13 @@ namespace NES
 /// a @link PhysicalPlan into @link CompiledQueryPlan.
 struct PipelinedQueryPlan final
 {
-    explicit PipelinedQueryPlan(QueryId id, ExecutionMode executionMode);
+    explicit PipelinedQueryPlan(QueryId id, ExecutionMode executionMode, std::string cacheKeySeed);
 
     friend std::ostream& operator<<(std::ostream& os, const PipelinedQueryPlan& plan);
 
     [[nodiscard]] QueryId getQueryId() const;
     [[nodiscard]] ExecutionMode getExecutionMode() const;
+    [[nodiscard]] const std::string& getCacheKeySeed() const;
 
     [[nodiscard]] std::vector<std::shared_ptr<Pipeline>> getSourcePipelines() const;
     [[nodiscard]] const std::vector<std::shared_ptr<Pipeline>>& getPipelines() const;
@@ -49,6 +51,7 @@ struct PipelinedQueryPlan final
 private:
     QueryId queryId;
     ExecutionMode executionMode;
+    std::string cacheKeySeed;
     std::vector<std::shared_ptr<Pipeline>> pipelines;
 };
 }

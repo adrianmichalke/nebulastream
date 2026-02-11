@@ -32,8 +32,7 @@ namespace NES
 
 RowTupleBufferRef::RowTupleBufferRef(std::vector<Field> fields, const uint64_t tupleSize, const uint64_t bufferSize)
     : TupleBufferRef(bufferSize / tupleSize, bufferSize, tupleSize), fields(std::move(fields))
-{
-}
+{ }
 
 namespace
 {

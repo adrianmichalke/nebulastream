@@ -14,9 +14,11 @@
 
 #include <Phases/PipeliningPhase.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -40,6 +42,7 @@
 #include <PipelinedQueryPlan.hpp>
 #include <ScanPhysicalOperator.hpp>
 #include <SinkPhysicalOperator.hpp>
+#include <SourcePhysicalOperator.hpp>
 
 namespace NES::QueryCompilation::PipeliningPhase
 {
@@ -48,6 +51,106 @@ namespace
 {
 
 using OperatorPipelineMap = std::unordered_map<OperatorId, std::shared_ptr<Pipeline>>;
+
+void appendOperatorSpecificCacheSignature(const PhysicalOperator& physicalOperator, std::ostringstream& signature)
+{
+    if (const auto source = physicalOperator.tryGet<SourcePhysicalOperator>(); source.has_value())
+    {
+        const auto descriptor = source->getDescriptor();
+        const auto logicalSource = descriptor.getLogicalSource();
+        signature << ",sourceType=" << descriptor.getSourceType();
+        signature << ",sourceName=" << logicalSource.getLogicalSourceName();
+        signature << ",sourceSchema=" << *logicalSource.getSchema();
+        const auto parserConfig = descriptor.getParserConfig();
+        signature << ",parserType=" << parserConfig.parserType;
+        signature << ",tupleDelimiter=" << parserConfig.tupleDelimiter;
+        signature << ",fieldDelimiter=" << parserConfig.fieldDelimiter;
+    }
+    if (const auto sink = physicalOperator.tryGet<SinkPhysicalOperator>(); sink.has_value())
+    {
+        const auto descriptor = sink->getDescriptor();
+        signature << ",sinkType=" << descriptor.getSinkType();
+        signature << ",sinkSchema=" << *descriptor.getSchema();
+        if (const auto formatType = descriptor.getFormatType(); formatType.has_value())
+        {
+            signature << ",sinkFormat=" << formatType.value();
+        }
+        else
+        {
+            signature << ",sinkFormat=<none>";
+        }
+    }
+}
+
+void appendOptionalSchemaSignature(std::ostringstream& signature, const std::optional<Schema>& schema)
+{
+    if (schema.has_value())
+    {
+        signature << schema.value();
+    }
+    else
+    {
+        signature << "<none>";
+    }
+}
+
+void appendOptionalLayoutSignature(std::ostringstream& signature, const std::optional<MemoryLayoutType>& layout)
+{
+    if (layout.has_value())
+    {
+        signature << static_cast<int>(layout.value());
+    }
+    else
+    {
+        signature << "<none>";
+    }
+}
+
+void appendWrapperCacheSignature(const std::shared_ptr<PhysicalOperatorWrapper>& wrapper, std::ostringstream& signature)
+{
+    const auto& physicalOperator = wrapper->getPhysicalOperator();
+    signature << "{op=" << physicalOperator.toString();
+    signature << ",opId=" << physicalOperator.getId();
+    if (const auto& handlerId = wrapper->getHandlerId(); handlerId.has_value())
+    {
+        signature << ",handlerId=" << handlerId.value();
+    }
+    else
+    {
+        signature << ",handlerId=<none>";
+    }
+    appendOperatorSpecificCacheSignature(physicalOperator, signature);
+    signature << ",inSchema=";
+    appendOptionalSchemaSignature(signature, wrapper->getInputSchema());
+    signature << ",outSchema=";
+    appendOptionalSchemaSignature(signature, wrapper->getOutputSchema());
+    signature << ",inLayout=";
+    appendOptionalLayoutSignature(signature, wrapper->getInputMemoryLayoutType());
+    signature << ",outLayout=";
+    appendOptionalLayoutSignature(signature, wrapper->getOutputMemoryLayoutType());
+    signature << ",loc=" << static_cast<int>(wrapper->getPipelineLocation());
+    signature << ",children=[";
+    for (const auto& children = wrapper->getChildren(); const auto& child : children)
+    {
+        appendWrapperCacheSignature(child, signature);
+    }
+    signature << "]}";
+}
+
+std::string createCacheKeySeed(const PhysicalPlan& physicalPlan)
+{
+    std::ostringstream signature;
+    signature << "sql=" << physicalPlan.getOriginalSql();
+    signature << "|mode=" << static_cast<int>(physicalPlan.getExecutionMode());
+    signature << "|buffer=" << physicalPlan.getOperatorBufferSize();
+    signature << "|roots=[";
+    for (const auto& rootWrapper : physicalPlan.getRootOperators())
+    {
+        appendWrapperCacheSignature(rootWrapper, signature);
+    }
+    signature << "]";
+    return signature.str();
+}
 
 /// Helper function to add a default scan operator
 /// This is used only when the wrapped operator does not already provide a scan
@@ -74,11 +177,14 @@ PhysicalOperator createScanOperator(
     /// with a parser type other than "NATIVE" (NATIVE data does not require formatting)
     if (prevPipeline.isSourcePipeline())
     {
-        const auto inputFormatterConfig = prevPipeline.getRootOperator().get<SourcePhysicalOperator>().getDescriptor().getParserConfig();
+        const auto sourcePhysicalOperator = prevPipeline.getRootOperator().get<SourcePhysicalOperator>();
+        const auto inputFormatterConfig = sourcePhysicalOperator.getDescriptor().getParserConfig();
         if (toUpperCase(inputFormatterConfig.parserType) != "NATIVE")
         {
             return ScanPhysicalOperator(
-                provideInputFormatterTupleBufferRef(inputFormatterConfig, memoryProvider), inputSchema->getFieldNames());
+                provideInputFormatterTupleBufferRef(inputFormatterConfig, memoryProvider),
+                inputSchema->getFieldNames(),
+                sourcePhysicalOperator.getOriginId());
         }
     }
     return ScanPhysicalOperator(memoryProvider, inputSchema->getFieldNames());
@@ -310,7 +416,8 @@ void buildPipelineRecursively(
 std::shared_ptr<PipelinedQueryPlan> apply(const PhysicalPlan& physicalPlan)
 {
     const uint64_t configuredBufferSize = physicalPlan.getOperatorBufferSize();
-    auto pipelinedPlan = std::make_shared<PipelinedQueryPlan>(physicalPlan.getQueryId(), physicalPlan.getExecutionMode());
+    auto pipelinedPlan = std::make_shared<PipelinedQueryPlan>(
+        physicalPlan.getQueryId(), physicalPlan.getExecutionMode(), createCacheKeySeed(physicalPlan));
 
     OperatorPipelineMap pipelineMap;
 

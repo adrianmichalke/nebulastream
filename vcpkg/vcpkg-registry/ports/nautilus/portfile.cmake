@@ -17,7 +17,14 @@ vcpkg_from_github(
         SHA512 4f344d38e2e377bb7d153c6cf000f3171726ed5bfe80bf5931c6a37bb7645f64959ca64440f0aa82363727287265f5902dbe045117e95e1ebd1c61817182f0fc
 		PATCHES
 		0001-disable-ubsan-function-call-check.patch
-)
+		0002-mlir-blob-capture.patch
+			0003-cache-load-parse-pointer-symbols.patch
+			0004-cache-load-rebuild-proxy-symbol-map.patch
+				0005-cache-key-include-const-pointers.patch
+				0006-cache-hotpath-and-race-fixes.patch
+				0010-constptr-relocation-skip-trace.patch
+				0011-explicit-cache-key-compile-ordinal.patch
+		)
 
 set(ADDITIONAL_CMAKE_OPTIONS "")
 if (NOT "mlir" IN_LIST FEATURES)

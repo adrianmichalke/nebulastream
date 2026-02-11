@@ -135,8 +135,7 @@ void EmitPhysicalOperator::emitRecordBuffer(
 
 EmitPhysicalOperator::EmitPhysicalOperator(OperatorHandlerId operatorHandlerId, std::shared_ptr<TupleBufferRef> memoryProvider)
     : bufferRef(std::move(memoryProvider)), operatorHandlerId(operatorHandlerId)
-{
-}
+{ }
 
 [[nodiscard]] uint64_t EmitPhysicalOperator::getMaxRecordsPerBuffer() const
 {

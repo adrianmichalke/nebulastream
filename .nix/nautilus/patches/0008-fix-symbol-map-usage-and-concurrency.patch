@@ -1,0 +1,129 @@
+--- a/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
++++ b/nautilus/src/nautilus/compiler/backends/mlir/MLIRCompilationBackend.cpp
+@@ -391,6 +391,7 @@
+ 
+ 	::mlir::OwningOpRef<::mlir::ModuleOp> mlirModule;
+ 	bool loadedFromBlob = false;
++	bool symbolMapLoadedFromFile = false;
+ 
+ 	if (blobMode == "load") {
+ 		if (blobPath.empty()) {
+@@ -424,44 +425,35 @@
+ 			mlirModule = moduleOp;
+ 			loadedFromBlob = true;
+ 
+-			// Best-effort symbol resolution for external calls.
+-			NES::ProxyFunctions proxyFunctions;
+-			try {
+-				(void) llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
+-			} catch (...) {
+-			}
+-			for (auto fn : mlirModule->getOps<::mlir::LLVM::LLVMFuncOp>()) {
+-				if (fn.getLinkage() != ::mlir::LLVM::Linkage::External) {
+-					continue;
+-				}
+-				auto name = fn.getName().str();
+-				void* addr = nullptr;
+-				if (name.size() > 2 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
+-					char* end = nullptr;
+-					errno = 0;
+-					const auto parsed = std::strtoull(name.c_str(), &end, 16);
+-					if (errno == 0 && end != name.c_str() && *end == '\0') {
+-						addr = reinterpret_cast<void*>(static_cast<uintptr_t>(parsed));
+-					}
+-				}
+-				if (addr == nullptr) {
++			symbolMapLoadedFromFile = tryLoadBlobSymbolMap(blobSymbolMapPath, jitProxyFunctionSymbols, jitProxyTargetAddresses);
++			if (!symbolMapLoadedFromFile && ir == nullptr) {
++				throw RuntimeException("No symbol map available for blob load without tracing: " + blobSymbolMapPath.string());
++			}
++
++			if (!symbolMapLoadedFromFile) {
++				NES::ProxyFunctions proxyFunctions;
+ 				try {
+-					addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(name);
++					(void) llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
+ 				} catch (...) {
+-					addr = nullptr;
+ 				}
+-				}
+-				if (addr == nullptr) {
+-					addr = proxyFunctions.getProxyFunctionAddress(name);
+-				}
+-				if (addr != nullptr) {
+-					jitProxyFunctionSymbols.emplace_back(name);
+-					jitProxyTargetAddresses.emplace_back(addr);
++				for (auto fn : mlirModule->getOps<::mlir::LLVM::LLVMFuncOp>()) {
++					if (fn.getLinkage() != ::mlir::LLVM::Linkage::External) {
++						continue;
++					}
++					auto name = fn.getName().str();
++					if (void* addr = resolveSymbolAddress(name, proxyFunctions); addr != nullptr) {
++						jitProxyFunctionSymbols.emplace_back(name);
++						jitProxyTargetAddresses.emplace_back(addr);
++					}
+ 				}
+ 			}
+ 		} catch (...) {
++			if (ir == nullptr) {
++				throw;
++			}
+ 			// Fall back to regular compilation if the cache is missing or corrupted.
+ 			loadedFromBlob = false;
++			symbolMapLoadedFromFile = false;
+ 			capturedBlob.clear();
+ 			jitProxyFunctionSymbols.clear();
+ 			jitProxyTargetAddresses.clear();
+@@ -469,19 +461,22 @@
+ 		}
+ 	}
+ 
+-	auto loweringProvider = std::make_unique<MLIRLoweringProvider>(context, options, intrinsicManager);
+-	auto loweredMlirModule = loweringProvider->generateModuleFromIR(ir);
+-	if (*loweredMlirModule == nullptr) {
+-		throw RuntimeException("verification of MLIR module failed!");
+-	};
+-
+-	// Recreate the exact runtime symbol map from IR lowering, even when loading
+-	// a cached MLIR blob. Some proxy symbols are not discoverable via dlsym.
+-	jitProxyFunctionSymbols = loweringProvider->getJitProxyFunctionSymbols();
+-	jitProxyTargetAddresses = loweringProvider->getJitProxyTargetAddresses();
++	const bool shouldRebuildSymbolMapFromIR = loadedFromBlob && !symbolMapLoadedFromFile && ir != nullptr;
++	if (!loadedFromBlob || shouldRebuildSymbolMapFromIR) {
++		if (ir == nullptr) {
++			throw RuntimeException("No IR available for lowering");
++		}
++		auto loweringProvider = std::make_unique<MLIRLoweringProvider>(context, options, intrinsicManager);
++		auto loweredMlirModule = loweringProvider->generateModuleFromIR(ir);
++		if (*loweredMlirModule == nullptr) {
++			throw RuntimeException("verification of MLIR module failed!");
++		};
++		jitProxyFunctionSymbols = loweringProvider->getJitProxyFunctionSymbols();
++		jitProxyTargetAddresses = loweringProvider->getJitProxyTargetAddresses();
+ 
+-	if (!loadedFromBlob) {
+-		mlirModule = std::move(loweredMlirModule);
++		if (!loadedFromBlob) {
++			mlirModule = std::move(loweredMlirModule);
++		}
+ 	}
+ 
+ 	// 2.a dump MLIR to console or a file
+@@ -550,12 +545,13 @@
+ 						throw RuntimeException("Failed to rename MLIR bytecode cache file: " + ec.message());
+ 					}
+ 				}
+-			} else if (!captureInMemory) {
+-				throw RuntimeException(
+-				    "engine.Blob.Mode=emit requires engine.Blob.Path or engine.Blob.CaptureInMemory=true");
++				} else if (!captureInMemory) {
++					throw RuntimeException(
++					    "engine.Blob.Mode=emit requires engine.Blob.Path or engine.Blob.CaptureInMemory=true");
++				}
++				writeBlobSymbolMap(blobSymbolMapPath, jitProxyFunctionSymbols, jitProxyTargetAddresses);
+ 			}
+ 		}
+-	}
+ 
+ 	// 3. Lower MLIR module to LLVM IR and create LLVM IR optimization pipeline.
+ 	auto optPipeline = LLVMIROptimizer::getLLVMOptimizerPipeline(options, dumpHandler);

@@ -1,0 +1,42 @@
+diff --git a/nautilus/src/nautilus/compiler/JITCompiler.cpp b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+--- a/nautilus/src/nautilus/compiler/JITCompiler.cpp
++++ b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+@@ -106,12 +106,17 @@
+ 	return "nautilus.mlirbc.cache.v3.ptr_sensitive\n";
+ }
+ 
+-std::filesystem::path getBlobCachePathForExplicitKey(const std::filesystem::path& cacheRoot, std::string_view backendName,
+-                                                     const engine::Options& options, std::string_view cacheKey) {
++std::filesystem::path getBlobCachePathForExplicitKey(const std::filesystem::path& cacheRoot,
++                                                     std::string_view backendName,
++                                                     const engine::Options& options,
++                                                     std::string_view cacheKey,
++                                                     std::string_view functionTypeName) {
+ 	uint64_t hash = kFNV1a64OffsetBasis;
+-	hash = fnv1a64Append(hash, "nautilus.mlirbc.cache.v4.explicit\n");
++	hash = fnv1a64Append(hash, "nautilus.mlirbc.cache.v5.explicit\n");
+ 	appendCompilationBackendOptionsToHash(hash, backendName, options);
+ 	hash = fnv1a64Append(hash, cacheKey);
++	hash = fnv1a64Append(hash, "\nfn_type=");
++	hash = fnv1a64Append(hash, functionTypeName);
+ 	return cacheRoot / (hex64(hash) + ".mlirbc");
+ }
+ 
+@@ -375,6 +380,7 @@
+ 	const bool cacheEnabled = (!cacheDir.empty() && blobMode == "off" && backendName == "mlir");
+ 	const bool skipTraceOnHit = options.getOptionOrDefault("engine.Blob.SkipTraceOnHit", true);
+ 	const auto explicitCacheKey = options.getOptionOrDefault<std::string>("engine.Blob.CacheKey", std::string {});
++	const auto explicitCacheFunctionTypeName = std::string(function.target_type().name());
+ 	std::optional<std::filesystem::path> explicitBlobPath;
+ 
+ 	if (cacheEnabled && !explicitCacheKey.empty()) {
+@@ -382,7 +388,8 @@
+ 		std::filesystem::path cacheRoot(cacheDir);
+ 		std::filesystem::create_directories(cacheRoot, ec);
+ 		if (!ec) {
+-			auto blobPath = getBlobCachePathForExplicitKey(cacheRoot, backendName, options, explicitCacheKey);
++			auto blobPath =
++			    getBlobCachePathForExplicitKey(cacheRoot, backendName, options, explicitCacheKey, explicitCacheFunctionTypeName);
+ 			explicitBlobPath = blobPath;
+ 			if (std::filesystem::exists(blobPath)) {
+ 				std::filesystem::path constPtrRelocationMetadataPath;

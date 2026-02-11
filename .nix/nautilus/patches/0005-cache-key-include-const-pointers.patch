@@ -1,0 +1,50 @@
+diff --git a/nautilus/src/nautilus/compiler/JITCompiler.cpp b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+index 7189ef6..d7677cf 100644
+--- a/nautilus/src/nautilus/compiler/JITCompiler.cpp
++++ b/nautilus/src/nautilus/compiler/JITCompiler.cpp
+@@ -18,6 +18,8 @@
+ 
+ #ifdef ENABLE_COMPILER
+ 
++#include "nautilus/compiler/ir/operations/ConstPtrOperation.hpp"
++#include "nautilus/compiler/ir/operations/FunctionOperation.hpp"
+ #include "nautilus/compiler/ir/util/GraphVizUtil.hpp"
+ #include "nautilus/tracing/TraceContext.hpp"
+ #include "nautilus/tracing/phases/SSACreationPhase.hpp"
+@@ -44,6 +46,19 @@ std::string hex64(uint64_t value) {
+ 	ss << std::hex << std::setw(16) << std::setfill('0') << value;
+ 	return ss.str();
+ }
++
++void fnv1a64AppendConstPointerLiterals(uint64_t& hash, const std::shared_ptr<ir::IRGraph>& irGraph) {
++	const auto& rootOperation = irGraph->getRootOperation();
++	for (const auto& basicBlock : rootOperation.getBasicBlocks()) {
++		for (const auto& operation : basicBlock->getOperations()) {
++			if (const auto* constPtrOp = operation->dynCast<ir::ConstPtrOperation>()) {
++				const auto ptrValue = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(constPtrOp->getValue()));
++				hash = fnv1a64Append(hash, "\nconst_ptr=");
++				hash = fnv1a64Append(hash, hex64(ptrValue));
++			}
++		}
++	}
++}
+ } // namespace
+ #endif
+ 
+@@ -119,7 +134,7 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 		std::filesystem::create_directories(cacheRoot, ec);
+ 		if (!ec) {
+ 			uint64_t hash = kFNV1a64OffsetBasis;
+-			hash = fnv1a64Append(hash, "nautilus.mlirbc.cache.v1\n");
++			hash = fnv1a64Append(hash, "nautilus.mlirbc.cache.v2\n");
+ 			hash = fnv1a64Append(hash, backendName);
+ 			hash = fnv1a64Append(hash, "\nmt=");
+ 			hash = fnv1a64Append(hash, options.getOptionOrDefault("mlir.enableMultithreading", true) ? "1" : "0");
+@@ -129,6 +144,7 @@ std::unique_ptr<Executable> JITCompiler::compile(JITCompiler::wrapper_function f
+ 			hash = fnv1a64Append(hash, options.getOptionOrDefault("mlir.inline_invoke_calls", false) ? "1" : "0");
+ 			hash = fnv1a64Append(hash, "\n");
+ 			hash = fnv1a64Append(hash, irText.empty() ? ir->toString() : irText);
++			fnv1a64AppendConstPointerLiterals(hash, ir);
+ 
+ 			auto blobPath = cacheRoot / (hex64(hash) + ".mlirbc");
+ 			if (std::filesystem::exists(blobPath)) {

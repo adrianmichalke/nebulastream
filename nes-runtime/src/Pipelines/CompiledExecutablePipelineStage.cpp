@@ -14,7 +14,10 @@
 #include <Pipelines/CompiledExecutablePipelineStage.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <ostream>
 #include <unordered_map>
@@ -58,6 +61,11 @@ void CompiledExecutablePipelineStage::execute(const TupleBuffer& inputTupleBuffe
 nautilus::engine::CallableFunction<void, PipelineExecutionContext*, const TupleBuffer*, const Arena*>
 CompiledExecutablePipelineStage::compilePipeline() const
 {
+    if (const char* cacheDebug = std::getenv("NES_COMPILATION_CACHE_DEBUG"); cacheDebug && *cacheDebug)
+    {
+        std::cerr << "cache-debug compilePipeline stage=" << reinterpret_cast<uintptr_t>(this)
+                  << " pipelineId=" << pipeline->getPipelineId().getRawValue() << '\n';
+    }
     CPPTRACE_TRY
     {
         /// We must capture the operatorPipeline by value to ensure it is not destroyed before the function is called
@@ -114,6 +122,11 @@ std::ostream& CompiledExecutablePipelineStage::toString(std::ostream& os) const
 
 void CompiledExecutablePipelineStage::start(PipelineExecutionContext& pipelineExecutionContext)
 {
+    if (const char* cacheDebug = std::getenv("NES_COMPILATION_CACHE_DEBUG"); cacheDebug && *cacheDebug)
+    {
+        std::cerr << "cache-debug start stage=" << reinterpret_cast<uintptr_t>(this)
+                  << " pipelineId=" << pipeline->getPipelineId().getRawValue() << '\n';
+    }
     pipelineExecutionContext.setOperatorHandlers(operatorHandlers);
     Arena arena(pipelineExecutionContext.getBufferManager());
     ExecutionContext ctx(std::addressof(pipelineExecutionContext), std::addressof(arena));
