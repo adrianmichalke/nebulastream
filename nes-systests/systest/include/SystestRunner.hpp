@@ -102,7 +102,10 @@ void printQueryResultToStdOut(
     SystestProgressTracker& progressTracker,
     std::string_view queryPerformanceMessage);
 
-/// Aggregated query runtime metrics (sum of per-query wall times).
+void resetQueryCompilationMetrics();
+[[nodiscard]] std::chrono::nanoseconds getQueryCompilationSum();
+[[nodiscard]] uint64_t getQueryCompilationMeasurements();
+
 void resetQueryRuntimeMetrics();
 [[nodiscard]] std::chrono::nanoseconds getQueryRuntimeSum();
 [[nodiscard]] uint64_t getQueryRuntimeMeasurements();

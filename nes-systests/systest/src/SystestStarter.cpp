@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 #include <Configurations/Util.hpp>
-#include <Pipelines/CompiledExecutablePipelineStage.hpp>
 #include <Util/Logger/LogLevel.hpp>
 #include <Util/Logger/Logger.hpp>
 #include <Util/Signal.hpp>
@@ -473,7 +472,7 @@ int main(int argc, const char** argv)
 
     const auto endTime = std::chrono::high_resolution_clock::now();
     const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-    const auto compilationSumTime = NES::CompiledExecutablePipelineStage::getTotalCompilationTime();
+    const auto compilationSumTime = NES::Systest::getQueryCompilationSum();
     const auto runtimeSumTime = NES::Systest::getQueryRuntimeSum();
     const auto totalWorkNanoseconds = compilationSumTime.count() + runtimeSumTime.count();
     const auto compilationShare = totalWorkNanoseconds > 0

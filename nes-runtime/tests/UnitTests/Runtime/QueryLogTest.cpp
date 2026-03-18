@@ -44,24 +44,27 @@ protected:
 /// NOLINTBEGIN(readability-magic-numbers,bugprone-unchecked-optional-access,misc-include-cleaner)
 TEST_F(QueryLogTest, LogQueryStatusChangeBasic)
 {
-    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime));
-    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms));
-    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 200ms));
+    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime));
+    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime + 100ms));
+    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 200ms));
+    EXPECT_TRUE(queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 300ms));
 }
 
 TEST_F(QueryLogTest, GetLogForQuery)
 {
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 200ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 200ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 300ms);
 
     const auto log = queryLog->getLogForQuery(testQueryId);
     ASSERT_TRUE(log.has_value());
-    EXPECT_EQ(log->size(), 3);
+    EXPECT_EQ(log->size(), 4);
 
-    EXPECT_EQ(log->at(0).state, QueryState::Started);
-    EXPECT_EQ(log->at(1).state, QueryState::Running);
-    EXPECT_EQ(log->at(2).state, QueryState::Stopped);
+    EXPECT_EQ(log->at(0).state, QueryState::Compiling);
+    EXPECT_EQ(log->at(1).state, QueryState::Started);
+    EXPECT_EQ(log->at(2).state, QueryState::Running);
+    EXPECT_EQ(log->at(3).state, QueryState::Stopped);
 }
 
 TEST_F(QueryLogTest, GetLogForNonExistentQuery)
@@ -72,9 +75,10 @@ TEST_F(QueryLogTest, GetLogForNonExistentQuery)
 
 TEST_F(QueryLogTest, GetQuerySummarySuccessfulExecution)
 {
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 200ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 200ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 300ms);
 
     const auto status = queryLog->getQueryStatus(testQueryId);
     ASSERT_TRUE(status.has_value());
@@ -82,23 +86,26 @@ TEST_F(QueryLogTest, GetQuerySummarySuccessfulExecution)
     EXPECT_EQ(status->queryId, testQueryId);
     EXPECT_EQ(status->state, QueryState::Stopped);
 
+    EXPECT_TRUE(status->metrics.compilation.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_TRUE(status->metrics.stop.has_value());
     EXPECT_FALSE(status->metrics.error.has_value());
 
-    EXPECT_EQ(*status->metrics.start, testTime);
-    EXPECT_EQ(*status->metrics.running, testTime + 100ms);
-    EXPECT_EQ(*status->metrics.stop, testTime + 200ms);
+    EXPECT_EQ(*status->metrics.compilation, testTime);
+    EXPECT_EQ(*status->metrics.start, testTime + 100ms);
+    EXPECT_EQ(*status->metrics.running, testTime + 200ms);
+    EXPECT_EQ(*status->metrics.stop, testTime + 300ms);
 }
 
 TEST_F(QueryLogTest, GetQuerySummaryWithFailure)
 {
     const Exception testError{"Test error", 500};
 
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms);
-    queryLog->logQueryFailure(testQueryId, testError, testTime + 200ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 200ms);
+    queryLog->logQueryFailure(testQueryId, testError, testTime + 300ms);
 
     auto summary = queryLog->getQueryStatus(testQueryId);
     ASSERT_TRUE(summary.has_value());
@@ -106,6 +113,7 @@ TEST_F(QueryLogTest, GetQuerySummaryWithFailure)
     EXPECT_EQ(summary->queryId, testQueryId);
     EXPECT_EQ(summary->state, QueryState::Failed);
 
+    EXPECT_TRUE(summary->metrics.compilation.has_value());
     EXPECT_TRUE(summary->metrics.start.has_value());
     EXPECT_TRUE(summary->metrics.running.has_value());
     EXPECT_TRUE(summary->metrics.stop.has_value());
@@ -115,10 +123,28 @@ TEST_F(QueryLogTest, GetQuerySummaryWithFailure)
     EXPECT_EQ(summary->metrics.error->what(), "Test error");
 }
 
+TEST_F(QueryLogTest, GetQuerySummaryDuringCompilation)
+{
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime);
+
+    const auto status = queryLog->getQueryStatus(testQueryId);
+    ASSERT_TRUE(status.has_value());
+
+    EXPECT_EQ(status->queryId, testQueryId);
+    EXPECT_EQ(status->state, QueryState::Compiling);
+
+    EXPECT_TRUE(status->metrics.compilation.has_value());
+    EXPECT_FALSE(status->metrics.start.has_value());
+    EXPECT_FALSE(status->metrics.running.has_value());
+    EXPECT_FALSE(status->metrics.stop.has_value());
+    EXPECT_FALSE(status->metrics.error.has_value());
+}
+
 TEST_F(QueryLogTest, GetQuerySummaryPartialExecution)
 {
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 200ms);
 
     const auto status = queryLog->getQueryStatus(testQueryId);
     ASSERT_TRUE(status.has_value());
@@ -126,6 +152,7 @@ TEST_F(QueryLogTest, GetQuerySummaryPartialExecution)
     EXPECT_EQ(status->queryId, testQueryId);
     EXPECT_EQ(status->state, QueryState::Running);
 
+    EXPECT_TRUE(status->metrics.compilation.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_FALSE(status->metrics.stop.has_value());
@@ -143,10 +170,12 @@ TEST_F(QueryLogTest, MultipleQueriesIndependentLogs)
     constexpr QueryId query1{1};
     constexpr QueryId query2{2};
 
-    queryLog->logQueryStatusChange(query1, QueryState::Started, testTime);
-    queryLog->logQueryStatusChange(query2, QueryState::Started, testTime + 50ms);
+    queryLog->logQueryStatusChange(query1, QueryState::Compiling, testTime);
+    queryLog->logQueryStatusChange(query1, QueryState::Started, testTime + 25ms);
+    queryLog->logQueryStatusChange(query2, QueryState::Compiling, testTime + 50ms);
+    queryLog->logQueryStatusChange(query2, QueryState::Started, testTime + 75ms);
     queryLog->logQueryStatusChange(query1, QueryState::Running, testTime + 100ms);
-    queryLog->logQueryFailure(query2, Exception{"Query 2 failed", 400}, testTime + 150ms); /// NOLINT(*-magic-numbers)
+    queryLog->logQueryFailure(query2, Exception{"Query 2 failed", 400}, testTime + 150ms);
 
     const auto status1 = queryLog->getQueryStatus(query1);
     const auto status2 = queryLog->getQueryStatus(query2);
@@ -157,20 +186,20 @@ TEST_F(QueryLogTest, MultipleQueriesIndependentLogs)
     EXPECT_EQ(status1->state, QueryState::Running);
     EXPECT_EQ(status2->state, QueryState::Failed);
 
+    EXPECT_TRUE(status1->metrics.compilation.has_value());
     EXPECT_FALSE(status1->metrics.error.has_value());
+    EXPECT_TRUE(status2->metrics.compilation.has_value());
     EXPECT_TRUE(status2->metrics.error.has_value());
     EXPECT_EQ(status2->metrics.error->code(), 400);
 }
 
 TEST_F(QueryLogTest, QueryStateChangeConstructors)
 {
-    /// Test state-only constructor
     const QueryStateChange stateChange1(QueryState::Running, testTime);
     EXPECT_EQ(stateChange1.state, QueryState::Running);
     EXPECT_EQ(stateChange1.timestamp, testTime);
     EXPECT_FALSE(stateChange1.exception.has_value());
 
-    /// Test exception constructor
     const Exception testError{"Test exception", 404};
     QueryStateChange stateChange2(testError, testTime);
     EXPECT_EQ(stateChange2.state, QueryState::Failed);
@@ -181,45 +210,42 @@ TEST_F(QueryLogTest, QueryStateChangeConstructors)
 
 TEST_F(QueryLogTest, OutOfOrderEventsWithMonotonicTimestamps)
 {
-    /// Test that events can arrive out of order but with monotonic timestamps
-    /// Events arrive in order: Running, Started, Stopped (out of logical order)
-    /// But timestamps are monotonic: t0 <= t1 <= t2
     const auto time0 = testTime;
     const auto time1 = testTime + 100ms;
     const auto time2 = testTime + 200ms;
+    const auto time3 = testTime + 300ms;
 
-    /// Log events out of logical order but with monotonic timestamps
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, time1);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, time0);
-    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, time2);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, time2);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, time1);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, time0);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, time3);
 
-    /// Verify that the log preserves the order events were logged
     const auto log = queryLog->getLogForQuery(testQueryId);
     ASSERT_TRUE(log.has_value());
-    EXPECT_EQ(log->size(), 3);
+    EXPECT_EQ(log->size(), 4);
 
-    /// Verify status uses the most recent state and appropriate timestamps
     const auto status = queryLog->getQueryStatus(testQueryId);
     ASSERT_TRUE(status.has_value());
     EXPECT_EQ(status->state, QueryState::Stopped);
 
-    /// Metrics should reflect the actual timestamps, not arrival order
+    EXPECT_TRUE(status->metrics.compilation.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_TRUE(status->metrics.stop.has_value());
 
-    EXPECT_EQ(*status->metrics.start, time0);
-    EXPECT_EQ(*status->metrics.running, time1);
-    EXPECT_EQ(*status->metrics.stop, time2);
+    EXPECT_EQ(*status->metrics.compilation, time0);
+    EXPECT_EQ(*status->metrics.start, time1);
+    EXPECT_EQ(*status->metrics.running, time2);
+    EXPECT_EQ(*status->metrics.stop, time3);
 }
 
 TEST_F(QueryLogTest, EventsWithEqualTimestamps)
 {
-    /// Test behavior when multiple events have the same timestamp
     const auto sameTime = testTime;
     const Exception testError{"Test failure", 500};
 
     queryLog->logQueryStatusChange(testQueryId, QueryState::Registered, sameTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, sameTime);
     queryLog->logQueryStatusChange(testQueryId, QueryState::Started, sameTime);
     queryLog->logQueryStatusChange(testQueryId, QueryState::Running, sameTime);
     queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, sameTime);
@@ -227,25 +253,22 @@ TEST_F(QueryLogTest, EventsWithEqualTimestamps)
 
     const auto log = queryLog->getLogForQuery(testQueryId);
     ASSERT_TRUE(log.has_value());
-    EXPECT_EQ(log->size(), 5);
+    EXPECT_EQ(log->size(), 6);
 
-    /// All events should have the same timestamp
     for (const auto& entry : *log)
     {
         EXPECT_EQ(entry.timestamp, sameTime);
     }
 
-    /// Status should show the final state (Failed)
     const auto status = queryLog->getQueryStatus(testQueryId);
     ASSERT_TRUE(status.has_value());
     EXPECT_EQ(status->state, QueryState::Failed);
 
-    /// All metric timestamps should be the same
+    EXPECT_EQ(*status->metrics.compilation, sameTime);
     EXPECT_EQ(*status->metrics.start, sameTime);
     EXPECT_EQ(*status->metrics.running, sameTime);
     EXPECT_EQ(*status->metrics.stop, sameTime);
 
-    /// Error should be captured
     EXPECT_TRUE(status->metrics.error.has_value());
     EXPECT_EQ(status->metrics.error->code(), 500);
     EXPECT_STREQ(status->metrics.error->what(), "Test failure");
@@ -253,7 +276,6 @@ TEST_F(QueryLogTest, EventsWithEqualTimestamps)
 
 TEST_F(QueryLogTest, MultiThreadedLogging)
 {
-    /// Test that multiple threads can safely log to the same QueryLog instance
     constexpr uint64_t numThreads = 16;
     constexpr uint64_t numQueries = 1'000;
     const auto baseTime = testTime;
@@ -263,12 +285,12 @@ TEST_F(QueryLogTest, MultiThreadedLogging)
     const auto logSubmission = [this, baseTime, &barrier]
     {
         barrier.arrive_and_wait();
-        /// Each thread logs the same sequence of state changes for all queries
         for (uint64_t queryId = 0; queryId < numQueries; ++queryId)
         {
             const auto timestamp = baseTime + std::chrono::milliseconds{queryId * 10};
 
             queryLog->logQueryStatusChange(QueryId{queryId}, QueryState::Registered, timestamp);
+            queryLog->logQueryStatusChange(QueryId{queryId}, QueryState::Compiling, timestamp);
             queryLog->logQueryStatusChange(QueryId{queryId}, QueryState::Started, timestamp);
             queryLog->logQueryStatusChange(QueryId{queryId}, QueryState::Running, timestamp);
             queryLog->logQueryStatusChange(QueryId{queryId}, QueryState::Stopped, timestamp);
@@ -280,15 +302,13 @@ TEST_F(QueryLogTest, MultiThreadedLogging)
     {
         std::vector<std::jthread> threads;
         threads.reserve(numThreads);
-        /// Launch multiple threads that log events for different queries
         for (uint64_t threadId = 0; threadId < numThreads; ++threadId)
         {
             threads.emplace_back(logSubmission);
         }
     }
 
-    /// Verify that each thread's events were logged correctly
-    constexpr uint64_t eventsPerQuery = numThreads * 6;
+    constexpr uint64_t eventsPerQuery = numThreads * 7;
     for (uint64_t queryId = 0; queryId < numThreads; ++queryId)
     {
         const auto log = queryLog->getLogForQuery(QueryId{queryId});
@@ -298,6 +318,7 @@ TEST_F(QueryLogTest, MultiThreadedLogging)
         const auto status = queryLog->getQueryStatus(QueryId{queryId});
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(status->state, QueryState::Failed);
+        EXPECT_TRUE(status->metrics.compilation.has_value());
         EXPECT_TRUE(status->metrics.start.has_value());
         EXPECT_TRUE(status->metrics.stop.has_value());
         EXPECT_TRUE(status->metrics.error.has_value());
@@ -305,7 +326,6 @@ TEST_F(QueryLogTest, MultiThreadedLogging)
         EXPECT_STREQ(status->metrics.error->what(), "Test failure");
     }
 
-    /// Verify that we have logs for all expected queries and no extra ones
     const auto statusResults = queryLog->getStatus();
     EXPECT_EQ(statusResults.size(), numQueries);
 }

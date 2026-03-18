@@ -23,6 +23,7 @@
 #include <Identifiers/Identifiers.hpp>
 #include <cpptrace/basic.hpp>
 #include <fmt/format.h>
+#include <magic_enum/magic_enum.hpp>
 #include <ErrorHandling.hpp>
 #include <SingleNodeWorkerRPCService.pb.h>
 
@@ -35,6 +36,7 @@ void serializeWorkerStatus(const WorkerStatus& status, WorkerStatusResponse* res
     {
         auto* activeQueryGRPC = response->add_active_queries();
         activeQueryGRPC->set_query_id(activeQuery.queryId.getRawValue());
+        activeQueryGRPC->set_state(static_cast<::QueryState>(activeQuery.state));
         if (activeQuery.started)
         {
             activeQueryGRPC->set_started_unix_timestamp_in_milli_seconds(
@@ -83,8 +85,11 @@ WorkerStatus deserializeWorkerStatus(const WorkerStatusResponse* response)
             | std::views::transform(
                              [&](const auto& activeQuery)
                              {
+                                 auto state = magic_enum::enum_cast<QueryState>(static_cast<uint8_t>(activeQuery.state()));
+                                 INVARIANT(state.has_value(), "Unknown query state {} in worker status", activeQuery.state());
                                  return WorkerStatus::ActiveQuery{
                                      .queryId = QueryId(activeQuery.query_id()),
+                                     .state = *state,
                                      .started = activeQuery.has_started_unix_timestamp_in_milli_seconds()
                                          ? std::make_optional(fromMillis(activeQuery.started_unix_timestamp_in_milli_seconds()))
                                          : std::nullopt};

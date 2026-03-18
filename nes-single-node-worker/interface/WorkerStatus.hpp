@@ -19,6 +19,7 @@
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
 #include <Identifiers/NESStrongType.hpp>
+#include <Runtime/Execution/QueryStatus.hpp>
 #include <ErrorHandling.hpp>
 #include <SingleNodeWorkerRPCService.pb.h>
 
@@ -30,7 +31,7 @@ struct WorkerStatus
     struct ActiveQuery
     {
         QueryId queryId = INVALID<QueryId>;
-        /// If the query is still starting, it does not have a started timestamp yet
+        QueryState state = QueryState::Registered;
         std::optional<std::chrono::system_clock::time_point> started;
     };
 

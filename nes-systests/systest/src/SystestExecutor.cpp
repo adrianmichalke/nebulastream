@@ -35,7 +35,6 @@
 #include <utility>
 #include <vector>
 #include <unistd.h>
-#include <Pipelines/CompiledExecutablePipelineStage.hpp>
 #include <QueryManager/EmbeddedWorkerQuerySubmissionBackend.hpp>
 #include <QueryManager/GRPCQuerySubmissionBackend.hpp>
 #include <QueryManager/QueryManager.hpp>
@@ -264,7 +263,7 @@ void setupLogging(const SystestConfiguration& config)
 SystestExecutorResult SystestExecutor::executeSystests()
 {
     setupLogging(config);
-    CompiledExecutablePipelineStage::resetCompilationMetrics();
+    Systest::resetQueryCompilationMetrics();
     Systest::resetQueryRuntimeMetrics();
 
     CPPTRACE_TRY

@@ -146,7 +146,10 @@ std::vector<QueryId> QueryManager::getRunningQueries() const
         | std::views::filter([](const auto& idAndStatus) { return idAndStatus.has_value(); })
         | std::views::filter(
                [](auto idAndStatus)
-               { return idAndStatus->second.state == QueryState::Started || idAndStatus->second.state == QueryState::Running; })
+               {
+                   return idAndStatus->second.state == QueryState::Compiling || idAndStatus->second.state == QueryState::Started
+                       || idAndStatus->second.state == QueryState::Running;
+               })
         | std::views::transform([](auto idAndStatus) { return idAndStatus->first; }) | std::ranges::to<std::vector>();
 }
 

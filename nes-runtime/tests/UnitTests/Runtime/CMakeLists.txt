@@ -10,4 +10,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+add_nes_runtime_test(compilation-context-test "CompilationContextTest.cpp")
 add_nes_runtime_test(query-log-test "QueryLogTest.cpp")

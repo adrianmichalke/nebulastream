@@ -169,20 +169,26 @@ WorkerStatus SingleNodeWorker::getWorkerStatus(std::chrono::system_clock::time_p
         switch (state)
         {
             case QueryState::Registered:
-                /// Ignore these for the worker status
+                break;
+            case QueryState::Compiling:
+                INVARIANT(metrics.compilation.has_value(), "If query is compiling, it should have a compilation timestamp");
+                if (metrics.compilation.value() >= after)
+                {
+                    status.activeQueries.emplace_back(queryId, QueryState::Compiling, std::nullopt);
+                }
                 break;
             case QueryState::Started:
                 INVARIANT(metrics.start.has_value(), "If query is started, it should have a start timestamp");
                 if (metrics.start.value() >= after)
                 {
-                    status.activeQueries.emplace_back(queryId, std::nullopt);
+                    status.activeQueries.emplace_back(queryId, QueryState::Started, std::nullopt);
                 }
                 break;
             case QueryState::Running: {
                 INVARIANT(metrics.running.has_value(), "If query is running, it should have a running timestamp");
                 if (metrics.running.value() >= after)
                 {
-                    status.activeQueries.emplace_back(queryId, metrics.running.value());
+                    status.activeQueries.emplace_back(queryId, QueryState::Running, metrics.running.value());
                 }
                 break;
             }

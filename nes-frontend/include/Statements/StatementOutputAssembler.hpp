@@ -318,7 +318,7 @@ struct StatementOutputAssembler<WorkerStatusStatementResult>
         output.reserve(status.activeQueries.size() + status.terminatedQueries.size());
         for (const auto& activeQuery : status.activeQueries)
         {
-            output.emplace_back(activeQuery.queryId.getRawValue(), QueryState::Running, std::nullopt, activeQuery.started, std::nullopt);
+            output.emplace_back(activeQuery.queryId.getRawValue(), activeQuery.state, std::nullopt, activeQuery.started, std::nullopt);
         }
         for (const auto& terminatedQuery : status.terminatedQueries)
         {

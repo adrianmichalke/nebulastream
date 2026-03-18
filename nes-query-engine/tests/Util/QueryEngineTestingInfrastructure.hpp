@@ -203,8 +203,10 @@ class TestPipelineController
 {
 public:
     std::atomic_size_t invocations;
+    std::atomic<std::chrono::milliseconds> compileDuration = std::chrono::milliseconds(0);
     std::atomic<std::chrono::milliseconds> startDuration = std::chrono::milliseconds(0);
     std::atomic<std::chrono::milliseconds> stopDuration = std::chrono::milliseconds(0);
+    std::atomic_bool failOnCompile = false;
     std::atomic_bool failOnStart = false;
     std::atomic_bool failOnStop = false;
     std::atomic<size_t> throwOnNthInvocation = -1;
@@ -253,6 +255,15 @@ struct TestPipeline final : ExecutablePipelineStage
     {
         controller->stage = nullptr;
         controller->destruction.set_value();
+    }
+
+    void compile(PipelineExecutionContext&) override
+    {
+        std::this_thread::sleep_for(controller->compileDuration.load());
+        if (controller->failOnCompile)
+        {
+            throw Exception("I should throw here.", 9999);
+        }
     }
 
     void start(PipelineExecutionContext&) override

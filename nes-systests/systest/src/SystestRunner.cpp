@@ -49,6 +49,7 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp> ///NOLINT(misc-include-cleaner)
+#include <CompilationContext.hpp>
 #include <ErrorHandling.hpp>
 #include <QuerySubmitter.hpp>
 #include <SingleNodeWorkerConfiguration.hpp>
@@ -59,24 +60,35 @@ namespace NES::Systest
 {
 namespace
 {
+std::atomic<int64_t> queryCompilationSumNanoseconds{0};
+std::atomic<uint64_t> queryCompilationMeasurements{0};
 std::atomic<int64_t> queryRuntimeSumNanoseconds{0};
 std::atomic<uint64_t> queryRuntimeMeasurements{0};
+
+void recordQueryCompilation(const LocalQueryStatus& queryStatus)
+{
+    const auto compiling = queryStatus.metrics.compilation;
+    const auto end = queryStatus.metrics.start.has_value() ? queryStatus.metrics.start : queryStatus.metrics.stop;
+    if (not compiling.has_value() || not end.has_value() || end.value() < compiling.value())
+    {
+        return;
+    }
+
+    const auto elapsedTime = std::chrono::duration_cast<std::chrono::nanoseconds>(end.value() - compiling.value());
+    queryCompilationSumNanoseconds.fetch_add(elapsedTime.count());
+    queryCompilationMeasurements.fetch_add(1);
+}
 
 void recordQueryRuntime(const LocalQueryStatus& queryStatus)
 {
     const auto stop = queryStatus.metrics.stop;
-    if (not stop.has_value())
+    const auto running = queryStatus.metrics.running;
+    if (not stop.has_value() || not running.has_value() || stop.value() < running.value())
     {
         return;
     }
 
-    const auto start = queryStatus.metrics.running.has_value() ? queryStatus.metrics.running : queryStatus.metrics.start;
-    if (not start.has_value() || stop.value() < start.value())
-    {
-        return;
-    }
-
-    const auto elapsedTime = std::chrono::duration_cast<std::chrono::nanoseconds>(stop.value() - start.value());
+    const auto elapsedTime = std::chrono::duration_cast<std::chrono::nanoseconds>(stop.value() - running.value());
     queryRuntimeSumNanoseconds.fetch_add(elapsedTime.count());
     queryRuntimeMeasurements.fetch_add(1);
 }
@@ -137,6 +149,23 @@ void processQueryWithError(
         performanceMessageBuilder);
 }
 
+}
+
+void resetQueryCompilationMetrics()
+{
+    queryCompilationSumNanoseconds.store(0);
+    queryCompilationMeasurements.store(0);
+    CompilationContext::resetRegistrationEvents();
+}
+
+std::chrono::nanoseconds getQueryCompilationSum()
+{
+    return std::chrono::nanoseconds(queryCompilationSumNanoseconds.load());
+}
+
+uint64_t getQueryCompilationMeasurements()
+{
+    return queryCompilationMeasurements.load();
 }
 
 void resetQueryRuntimeMetrics()
@@ -312,6 +341,7 @@ std::vector<RunningQuery> runQueries(
             }
 
             auto& runningQuery = it->second;
+            recordQueryCompilation(queryStatus);
             recordQueryRuntime(queryStatus);
 
             if (queryStatus.state == QueryState::Failed)
@@ -465,6 +495,7 @@ std::vector<RunningQuery> runQueriesAndBenchmark(
         ranQueries.emplace_back(runningQueryPtr);
         submitter.startQuery(queryId);
         const auto summary = submitter.finishedQueries().at(0);
+        recordQueryCompilation(summary);
         recordQueryRuntime(summary);
 
         if (summary.state == QueryState::Failed)
