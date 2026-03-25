@@ -31,8 +31,8 @@ namespace NES
 
 struct QueryMetrics
 {
-    std::optional<std::chrono::system_clock::time_point> compilation;
     std::optional<std::chrono::system_clock::time_point> start;
+    std::optional<std::chrono::system_clock::time_point> compiling;
     std::optional<std::chrono::system_clock::time_point> running;
     std::optional<std::chrono::system_clock::time_point> stop;
     std::optional<Exception> error;

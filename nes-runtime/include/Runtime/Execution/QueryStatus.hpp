@@ -23,10 +23,10 @@ namespace NES
 enum class QueryState : uint8_t
 {
     Registered,
-    Compiling,
     Started,
-    Running,
-    Stopped,
+    Compiling,
+    Running, /// Compiling->Running when pipeline compilation and startup completed
+    Stopped, /// Running->Stopped when calling stop() and in Running state
     Failed,
 };
 

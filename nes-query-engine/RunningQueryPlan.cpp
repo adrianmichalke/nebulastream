@@ -210,7 +210,7 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
 
     /// Once all pipelines are compiled, schedule their start tasks.
     internal.allPipelinesCompiled.setCallback(
-        [&runningPlan = *runningPlan, queryId, &emitter, listener, pipelineStartCallbackRef]() mutable
+        [&runningPlan = *runningPlan, queryId, &emitter, pipelineStartCallbackRef]() mutable
         {
             std::vector<std::shared_ptr<RunningQueryPlanNode>> pipelinesToStart;
             {
@@ -226,7 +226,6 @@ std::pair<std::unique_ptr<RunningQueryPlan>, CallbackRef> RunningQueryPlan::star
                 }
             }
 
-            listener->onCompiled();
             for (auto& pipeline : pipelinesToStart)
             {
                 const auto pipelineId = pipeline->id;

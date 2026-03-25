@@ -300,13 +300,13 @@ void TestingHarness::expectQueryStatusEvents(QueryId id, std::initializer_list<Q
             case QueryState::Registered:
                 EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Registered, ::testing::_)).Times(1);
                 break;
-            case QueryState::Compiling:
-                EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Compiling, ::testing::_))
+            case QueryState::Started:
+                EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Started, ::testing::_))
                     .Times(1)
                     .WillOnce(::testing::Invoke([](auto, auto, auto) { return true; }));
                 break;
-            case QueryState::Started:
-                EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Started, ::testing::_))
+            case QueryState::Compiling:
+                EXPECT_CALL(*status, logQueryStatusChange(id, QueryState::Compiling, ::testing::_))
                     .Times(1)
                     .WillOnce(::testing::Invoke([](auto, auto, auto) { return true; }));
                 break;

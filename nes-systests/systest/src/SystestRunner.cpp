@@ -67,8 +67,8 @@ std::atomic<uint64_t> queryRuntimeMeasurements{0};
 
 void recordQueryCompilation(const LocalQueryStatus& queryStatus)
 {
-    const auto compiling = queryStatus.metrics.compilation;
-    const auto end = queryStatus.metrics.start.has_value() ? queryStatus.metrics.start : queryStatus.metrics.stop;
+    const auto compiling = queryStatus.metrics.compiling;
+    const auto end = queryStatus.metrics.running.has_value() ? queryStatus.metrics.running : queryStatus.metrics.stop;
     if (not compiling.has_value() || not end.has_value() || end.value() < compiling.value())
     {
         return;

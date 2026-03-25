@@ -573,6 +573,7 @@ bool ThreadPool::WorkerThread::operator()(CompilePipelineTask& compilePipeline) 
             [&](const TupleBuffer&, std::chrono::milliseconds)
             { INVARIANT(false, "Repeat pipeline compilation is currently not supported"); });
         pipeline->stage->compile(pec);
+        pool.statistic->onEvent(PipelineCompile{WorkerThread::id, compilePipeline.queryId, pipeline->id});
         const auto wasCompiled = pipeline->isCompiled.exchange(true);
         INVARIANT(!wasCompiled, "Pipeline {}-{} must not be compiled multiple times", compilePipeline.queryId, pipeline->id);
         return true;
@@ -880,12 +881,6 @@ void QueryCatalog::start(
         {
         }
 
-        void onCompiled() override
-        {
-            ENGINE_LOG_DEBUG("Query {} onCompiled", queryId);
-            listener->logQueryStatusChange(queryId, QueryState::Started, std::chrono::system_clock::now());
-        }
-
         void onRunning() override
         {
             ENGINE_LOG_DEBUG("Query {} onRunning", queryId);
@@ -998,7 +993,7 @@ void QueryCatalog::start(
     };
 
     auto queryListener = std::make_shared<RealQueryLifeTimeListener>(queryId, listener, statistic);
-    const auto compileTimestamp = std::chrono::system_clock::now();
+    const auto startTimestamp = std::chrono::system_clock::now();
     auto state = std::make_shared<StateRef>(Reserved{});
     this->queryStates.emplace(queryId, state);
     queryListener->state = state;
@@ -1008,7 +1003,8 @@ void QueryCatalog::start(
     if (state->transition([&](Reserved&&)
                           { return Starting{std::move(runningQueryPlan)}; })) /// NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
     {
-        listener->logQueryStatusChange(queryId, QueryState::Compiling, compileTimestamp);
+        listener->logQueryStatusChange(queryId, QueryState::Started, startTimestamp);
+        listener->logQueryStatusChange(queryId, QueryState::Compiling, std::chrono::system_clock::now());
     }
     else
     {

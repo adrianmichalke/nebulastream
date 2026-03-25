@@ -97,7 +97,6 @@ struct RunningQueryPlanNode
 struct QueryLifetimeListener
 {
     virtual ~QueryLifetimeListener() = default;
-    virtual void onCompiled() = 0;
     virtual void onRunning() = 0;
     virtual void onFailure(Exception) = 0;
     virtual void onDestruction() = 0;

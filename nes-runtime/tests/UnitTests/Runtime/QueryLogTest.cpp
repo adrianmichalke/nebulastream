@@ -86,16 +86,41 @@ TEST_F(QueryLogTest, GetQuerySummarySuccessfulExecution)
     EXPECT_EQ(status->queryId, testQueryId);
     EXPECT_EQ(status->state, QueryState::Stopped);
 
-    EXPECT_TRUE(status->metrics.compilation.has_value());
+    EXPECT_TRUE(status->metrics.compiling.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_TRUE(status->metrics.stop.has_value());
     EXPECT_FALSE(status->metrics.error.has_value());
 
-    EXPECT_EQ(*status->metrics.compilation, testTime);
+    EXPECT_EQ(*status->metrics.compiling, testTime);
     EXPECT_EQ(*status->metrics.start, testTime + 100ms);
     EXPECT_EQ(*status->metrics.running, testTime + 200ms);
     EXPECT_EQ(*status->metrics.stop, testTime + 300ms);
+}
+
+TEST_F(QueryLogTest, GetQuerySummaryWithCompilationPhase)
+{
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Started, testTime);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Compiling, testTime + 25ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Running, testTime + 100ms);
+    queryLog->logQueryStatusChange(testQueryId, QueryState::Stopped, testTime + 200ms);
+
+    const auto status = queryLog->getQueryStatus(testQueryId);
+    ASSERT_TRUE(status.has_value());
+
+    EXPECT_EQ(status->queryId, testQueryId);
+    EXPECT_EQ(status->state, QueryState::Stopped);
+
+    EXPECT_TRUE(status->metrics.start.has_value());
+    EXPECT_TRUE(status->metrics.compiling.has_value());
+    EXPECT_TRUE(status->metrics.running.has_value());
+    EXPECT_TRUE(status->metrics.stop.has_value());
+    EXPECT_FALSE(status->metrics.error.has_value());
+
+    EXPECT_EQ(*status->metrics.start, testTime);
+    EXPECT_EQ(*status->metrics.compiling, testTime + 25ms);
+    EXPECT_EQ(*status->metrics.running, testTime + 100ms);
+    EXPECT_EQ(*status->metrics.stop, testTime + 200ms);
 }
 
 TEST_F(QueryLogTest, GetQuerySummaryWithFailure)
@@ -113,7 +138,7 @@ TEST_F(QueryLogTest, GetQuerySummaryWithFailure)
     EXPECT_EQ(summary->queryId, testQueryId);
     EXPECT_EQ(summary->state, QueryState::Failed);
 
-    EXPECT_TRUE(summary->metrics.compilation.has_value());
+    EXPECT_TRUE(summary->metrics.compiling.has_value());
     EXPECT_TRUE(summary->metrics.start.has_value());
     EXPECT_TRUE(summary->metrics.running.has_value());
     EXPECT_TRUE(summary->metrics.stop.has_value());
@@ -133,7 +158,7 @@ TEST_F(QueryLogTest, GetQuerySummaryDuringCompilation)
     EXPECT_EQ(status->queryId, testQueryId);
     EXPECT_EQ(status->state, QueryState::Compiling);
 
-    EXPECT_TRUE(status->metrics.compilation.has_value());
+    EXPECT_TRUE(status->metrics.compiling.has_value());
     EXPECT_FALSE(status->metrics.start.has_value());
     EXPECT_FALSE(status->metrics.running.has_value());
     EXPECT_FALSE(status->metrics.stop.has_value());
@@ -152,7 +177,7 @@ TEST_F(QueryLogTest, GetQuerySummaryPartialExecution)
     EXPECT_EQ(status->queryId, testQueryId);
     EXPECT_EQ(status->state, QueryState::Running);
 
-    EXPECT_TRUE(status->metrics.compilation.has_value());
+    EXPECT_TRUE(status->metrics.compiling.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_FALSE(status->metrics.stop.has_value());
@@ -186,9 +211,9 @@ TEST_F(QueryLogTest, MultipleQueriesIndependentLogs)
     EXPECT_EQ(status1->state, QueryState::Running);
     EXPECT_EQ(status2->state, QueryState::Failed);
 
-    EXPECT_TRUE(status1->metrics.compilation.has_value());
+    EXPECT_TRUE(status1->metrics.compiling.has_value());
     EXPECT_FALSE(status1->metrics.error.has_value());
-    EXPECT_TRUE(status2->metrics.compilation.has_value());
+    EXPECT_TRUE(status2->metrics.compiling.has_value());
     EXPECT_TRUE(status2->metrics.error.has_value());
     EXPECT_EQ(status2->metrics.error->code(), 400);
 }
@@ -228,12 +253,12 @@ TEST_F(QueryLogTest, OutOfOrderEventsWithMonotonicTimestamps)
     ASSERT_TRUE(status.has_value());
     EXPECT_EQ(status->state, QueryState::Stopped);
 
-    EXPECT_TRUE(status->metrics.compilation.has_value());
+    EXPECT_TRUE(status->metrics.compiling.has_value());
     EXPECT_TRUE(status->metrics.start.has_value());
     EXPECT_TRUE(status->metrics.running.has_value());
     EXPECT_TRUE(status->metrics.stop.has_value());
 
-    EXPECT_EQ(*status->metrics.compilation, time0);
+    EXPECT_EQ(*status->metrics.compiling, time0);
     EXPECT_EQ(*status->metrics.start, time1);
     EXPECT_EQ(*status->metrics.running, time2);
     EXPECT_EQ(*status->metrics.stop, time3);
@@ -264,7 +289,7 @@ TEST_F(QueryLogTest, EventsWithEqualTimestamps)
     ASSERT_TRUE(status.has_value());
     EXPECT_EQ(status->state, QueryState::Failed);
 
-    EXPECT_EQ(*status->metrics.compilation, sameTime);
+    EXPECT_EQ(*status->metrics.compiling, sameTime);
     EXPECT_EQ(*status->metrics.start, sameTime);
     EXPECT_EQ(*status->metrics.running, sameTime);
     EXPECT_EQ(*status->metrics.stop, sameTime);
@@ -318,7 +343,7 @@ TEST_F(QueryLogTest, MultiThreadedLogging)
         const auto status = queryLog->getQueryStatus(QueryId{queryId});
         ASSERT_TRUE(status.has_value());
         EXPECT_EQ(status->state, QueryState::Failed);
-        EXPECT_TRUE(status->metrics.compilation.has_value());
+        EXPECT_TRUE(status->metrics.compiling.has_value());
         EXPECT_TRUE(status->metrics.start.has_value());
         EXPECT_TRUE(status->metrics.stop.has_value());
         EXPECT_TRUE(status->metrics.error.has_value());

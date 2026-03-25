@@ -132,19 +132,19 @@ grpc::Status GRPCServer::RequestQueryStatus(grpc::ServerContext* context, const 
         reply->set_queryid(queryId.getRawValue());
         if (const auto queryStatus = delegate.getQueryStatus(queryId); queryStatus.has_value())
         {
-            const auto& [compilation, start, running, stop, error] = queryStatus->metrics;
+            const auto& [start, compiling, running, stop, error] = queryStatus->metrics;
             reply->set_state(static_cast<::QueryState>(queryStatus->state));
-
-            if (compilation.has_value())
-            {
-                reply->mutable_metrics()->set_compilationunixtimeinms(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(compilation->time_since_epoch()).count());
-            }
 
             if (start.has_value())
             {
                 reply->mutable_metrics()->set_startunixtimeinms(
                     std::chrono::duration_cast<std::chrono::milliseconds>(start->time_since_epoch()).count());
+            }
+
+            if (compiling.has_value())
+            {
+                reply->mutable_metrics()->set_compilingunixtimeinms(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(compiling->time_since_epoch()).count());
             }
 
             if (running.has_value())
