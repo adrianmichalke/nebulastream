@@ -21,6 +21,7 @@
 #include <ranges>
 #include <vector>
 #include <Identifiers/Identifiers.hpp>
+#include <Runtime/Execution/QueryStatus.hpp>
 #include <cpptrace/basic.hpp>
 #include <fmt/format.h>
 #include <magic_enum/magic_enum.hpp>
@@ -81,19 +82,20 @@ WorkerStatus deserializeWorkerStatus(const WorkerStatusResponse* response)
     return {
         .after = fromMillis(response->after_unix_timestamp_in_milli_seconds()),
         .until = fromMillis(response->until_unix_timestamp_in_milli_seconds()),
-        .activeQueries = response->active_queries()
+        .activeQueries
+        = response->active_queries()
             | std::views::transform(
-                             [&](const auto& activeQuery)
-                             {
-                                 auto state = magic_enum::enum_cast<QueryState>(static_cast<uint8_t>(activeQuery.state()));
-                                 INVARIANT(state.has_value(), "Unknown query state {} in worker status", activeQuery.state());
-                                 return WorkerStatus::ActiveQuery{
-                                     .queryId = QueryId(activeQuery.query_id()),
-                                     .state = *state,
-                                     .started = activeQuery.has_started_unix_timestamp_in_milli_seconds()
-                                         ? std::make_optional(fromMillis(activeQuery.started_unix_timestamp_in_milli_seconds()))
-                                         : std::nullopt};
-                             })
+                [&](const auto& activeQuery)
+                {
+                    auto state = magic_enum::enum_cast<QueryState>(static_cast<uint8_t>(activeQuery.state()));
+                    INVARIANT(state.has_value(), "Unknown query state {} in worker status", static_cast<uint8_t>(activeQuery.state()));
+                    return WorkerStatus::ActiveQuery{
+                        .queryId = QueryId(activeQuery.query_id()),
+                        .state = *state,
+                        .started = activeQuery.has_started_unix_timestamp_in_milli_seconds()
+                            ? std::make_optional(fromMillis(activeQuery.started_unix_timestamp_in_milli_seconds()))
+                            : std::nullopt};
+                })
             | std::ranges::to<std::vector>(),
         .terminatedQueries
         = response->terminated_queries()

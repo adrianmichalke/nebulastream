@@ -15,9 +15,15 @@
 #include <CompilationContext.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <iterator>
 #include <mutex>
+#include <source_location>
 #include <utility>
+#include <vector>
+#include <Identifiers/Identifiers.hpp>
+#include <Runtime/Execution/OperatorHandler.hpp>
 #include <ErrorHandling.hpp>
 
 namespace NES
@@ -50,28 +56,28 @@ CompilationContext::ScopedRegistrationPhase::~ScopedRegistrationPhase()
 
 void CompilationContext::resetRegistrationEvents()
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     registrationEvents.clear();
 }
 
 std::vector<CompilationContext::RegistrationEvent> CompilationContext::getRegistrationEvents()
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     return registrationEvents;
 }
 
 std::vector<CompilationContext::RegistrationEvent> CompilationContext::getRegistrationEvents(const PipelineId pipelineId)
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     std::vector<RegistrationEvent> filteredEvents;
-    std::ranges::copy_if(registrationEvents, std::back_inserter(filteredEvents), [pipelineId](const auto& event)
-    { return event.pipelineId == pipelineId; });
+    std::ranges::copy_if(
+        registrationEvents, std::back_inserter(filteredEvents), [pipelineId](const auto& event) { return event.pipelineId == pipelineId; });
     return filteredEvents;
 }
 
 std::chrono::nanoseconds CompilationContext::getRegistrationDuration(const RegistrationPhase phase)
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     auto totalDuration = std::chrono::nanoseconds::zero();
     for (const auto& event : registrationEvents)
     {
@@ -85,7 +91,7 @@ std::chrono::nanoseconds CompilationContext::getRegistrationDuration(const Regis
 
 std::chrono::nanoseconds CompilationContext::getRegistrationDuration(const PipelineId pipelineId, const RegistrationPhase phase)
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     auto totalDuration = std::chrono::nanoseconds::zero();
     for (const auto& event : registrationEvents)
     {
@@ -99,20 +105,20 @@ std::chrono::nanoseconds CompilationContext::getRegistrationDuration(const Pipel
 
 uint64_t CompilationContext::getRegistrationCount(const RegistrationPhase phase)
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     return std::ranges::count_if(registrationEvents, [phase](const auto& event) { return event.phase == phase; });
 }
 
 uint64_t CompilationContext::getRegistrationCount(const PipelineId pipelineId, const RegistrationPhase phase)
 {
-    std::lock_guard lock(registrationEventsMutex);
-    return std::ranges::count_if(registrationEvents, [pipelineId, phase](const auto& event)
-    { return event.pipelineId == pipelineId and event.phase == phase; });
+    const std::lock_guard lock(registrationEventsMutex);
+    return std::ranges::count_if(
+        registrationEvents, [pipelineId, phase](const auto& event) { return event.pipelineId == pipelineId and event.phase == phase; });
 }
 
 void CompilationContext::recordRegistrationEvent(const std::source_location& location, const std::chrono::nanoseconds duration)
 {
-    std::lock_guard lock(registrationEventsMutex);
+    const std::lock_guard lock(registrationEventsMutex);
     registrationEvents.emplace_back(
         activeRegistrationScope.phase,
         activeRegistrationScope.pipelineId,
@@ -126,7 +132,8 @@ OperatorHandler* PipelineCompilationContext::getOperatorHandler(const OperatorHa
 {
     auto& operatorHandlers = pipelineExecutionContext.getOperatorHandlers();
     const auto operatorHandlerIterator = operatorHandlers.find(handlerId);
-    PRECONDITION(operatorHandlerIterator != operatorHandlers.end(), "Could not find operator handler {} during pipeline compilation", handlerId);
+    PRECONDITION(
+        operatorHandlerIterator != operatorHandlers.end(), "Could not find operator handler {} during pipeline compilation", handlerId);
     PRECONDITION(operatorHandlerIterator->second != nullptr, "Operator handler {} must not be null during pipeline compilation", handlerId);
     return operatorHandlerIterator->second.get();
 }

@@ -72,16 +72,25 @@ public:
     [[nodiscard]] static uint64_t getRegistrationCount(PipelineId pipelineId, RegistrationPhase phase);
 
     template <typename R, typename... FunctionArguments>
-    auto registerFunction(
-        R (*fnptr)(nautilus::val<FunctionArguments>...), const std::source_location& location = std::source_location::current()) const
+    auto registerFunction(R (*fnptr)(nautilus::val<FunctionArguments>...)) const
+    {
+        return registerFunction(fnptr, std::source_location::current());
+    }
+
+    template <typename R, typename... FunctionArguments>
+    auto registerFunction(R (*fnptr)(nautilus::val<FunctionArguments>...), const std::source_location& location) const
     {
         return registerFunctionImpl([&]() { return engine.registerFunction<R, FunctionArguments...>(fnptr); }, location);
     }
 
     template <typename R, typename... FunctionArguments>
-    auto registerFunction(
-        std::function<R(nautilus::val<FunctionArguments>...)> func,
-        const std::source_location& location = std::source_location::current()) const
+    auto registerFunction(std::function<R(nautilus::val<FunctionArguments>...)> func) const
+    {
+        return registerFunction(std::move(func), std::source_location::current());
+    }
+
+    template <typename R, typename... FunctionArguments>
+    auto registerFunction(std::function<R(nautilus::val<FunctionArguments>...)> func, const std::source_location& location) const
     {
         return registerFunctionImpl([&]() { return engine.registerFunction<R, FunctionArguments...>(func); }, location);
     }

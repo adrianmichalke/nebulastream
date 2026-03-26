@@ -17,7 +17,10 @@ include_directories(tests/include)
 
 # Add interface library
 add_library(nes-runtime-interface INTERFACE)
-target_include_directories(nes-runtime-interface INTERFACE interface)
+target_include_directories(nes-runtime-interface INTERFACE
+        interface
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include/nebulastream/>)
 target_link_libraries(nes-runtime-interface INTERFACE nes-configurations nes-query-engine-interface nes-query-compiler-interface)
 
 # Set Sources and Headers

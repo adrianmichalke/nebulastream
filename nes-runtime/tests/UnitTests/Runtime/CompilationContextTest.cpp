@@ -13,6 +13,7 @@
 */
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -23,13 +24,16 @@
 
 #include <gtest/gtest.h>
 
-#include <CompilationContext.hpp>
-#include <PhysicalOperator.hpp>
+#include <Identifiers/Identifiers.hpp>
+#include <Identifiers/NESStrongType.hpp>
 #include <Runtime/AbstractBufferProvider.hpp>
 #include <Runtime/Execution/OperatorHandler.hpp>
 #include <Runtime/QueryTerminationType.hpp>
 #include <Runtime/TupleBuffer.hpp>
+#include <CompilationContext.hpp>
 #include <Engine.hpp>
+#include <PhysicalOperator.hpp>
+#include <options.hpp>
 
 namespace NES
 {
@@ -41,12 +45,19 @@ public:
     explicit MockPipelineExecutionContext(const PipelineId pipelineId) : pipelineId(pipelineId) { }
 
     bool emitBuffer(const TupleBuffer&, ContinuationPolicy) override { throw std::logic_error("unused"); }
+
     void repeatTask(const TupleBuffer&, std::chrono::milliseconds) override { throw std::logic_error("unused"); }
+
     TupleBuffer allocateTupleBuffer() override { throw std::logic_error("unused"); }
+
     TupleBuffer& pinBuffer(TupleBuffer&&) override { throw std::logic_error("unused"); }
+
     [[nodiscard]] WorkerThreadId getId() const override { return INITIAL<WorkerThreadId>; }
+
     [[nodiscard]] uint64_t getNumberOfWorkerThreads() const override { return 1; }
+
     [[nodiscard]] std::shared_ptr<AbstractBufferProvider> getBufferManager() const override { return nullptr; }
+
     [[nodiscard]] PipelineId getPipelineId() const override { return pipelineId; }
 
     std::unordered_map<OperatorHandlerId, std::shared_ptr<OperatorHandler>>& getOperatorHandlers() override { return operatorHandlers; }
@@ -65,6 +76,7 @@ class TestOperatorHandler final : public OperatorHandler
 {
 public:
     void start(PipelineExecutionContext&, uint32_t) override { }
+
     void stop(QueryTerminationType, PipelineExecutionContext&) override { }
 
     bool wasCompiled = false;
@@ -78,20 +90,12 @@ struct CountingLeafOperator final : PhysicalOperatorConcept
     }
 
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override { return std::nullopt; }
+
     void setChild(PhysicalOperator) override { throw std::logic_error("unused"); }
 
-    void compile(PipelineCompilationContext& compilationContext) const override
-    {
-        ++(*compileCount);
-        auto* const operatorHandler = compilationContext.getOperatorHandlerAs<TestOperatorHandler>(handlerId);
-        if (operatorHandler == nullptr)
-        {
-            throw std::logic_error("unexpected operator handler type");
-        }
-        operatorHandler->wasCompiled = true;
-    }
+    void compile(CompilationContext&) const override { ++(*compileCount); }
 
-    void setup(ExecutionContext&, CompilationContext&) const override { ++(*setupCount); }
+    void setup(ExecutionContext&) const override { ++(*setupCount); }
 
     int* compileCount;
     int* setupCount;
@@ -103,6 +107,7 @@ struct ParentOperator final : PhysicalOperatorConcept
     explicit ParentOperator(PhysicalOperator child) : child(std::move(child)) { }
 
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override { return child; }
+
     void setChild(PhysicalOperator child) override { this->child = std::move(child); }
 
     std::optional<PhysicalOperator> child;
@@ -112,9 +117,10 @@ struct CompileStopOperator final : PhysicalOperatorConcept
 {
     explicit CompileStopOperator(PhysicalOperator child) : child(std::move(child)) { }
 
-    void compile(PipelineCompilationContext&) const override { }
+    void compile(CompilationContext&) const override { }
 
     [[nodiscard]] std::optional<PhysicalOperator> getChild() const override { return child; }
+
     void setChild(PhysicalOperator child) override { this->child = std::move(child); }
 
     std::optional<PhysicalOperator> child;
@@ -124,7 +130,7 @@ struct CompileStopOperator final : PhysicalOperatorConcept
 TEST(CompilationContextTest, TracksRegistrationPhaseAndCallsite)
 {
     CompilationContext::resetRegistrationEvents();
-    nautilus::engine::Options options;
+    const nautilus::engine::Options options;
     const nautilus::engine::NautilusEngine engine(options);
     const CompilationContext compilationContext(engine);
     const auto pipelineId = PipelineId(7);
@@ -136,8 +142,7 @@ TEST(CompilationContextTest, TracksRegistrationPhaseAndCallsite)
     }
 
     {
-        const CompilationContext::ScopedRegistrationPhase scopedRegistrationPhase(
-            CompilationContext::RegistrationPhase::Start, pipelineId);
+        const CompilationContext::ScopedRegistrationPhase scopedRegistrationPhase(CompilationContext::RegistrationPhase::Start, pipelineId);
         compilationContext.registerFunction(std::function<void()>([]() { }));
     }
 
@@ -156,50 +161,44 @@ TEST(CompilationContextTest, TracksRegistrationPhaseAndCallsite)
     EXPECT_EQ(CompilationContext::getRegistrationCount(CompilationContext::RegistrationPhase::Start), 1);
     EXPECT_EQ(CompilationContext::getRegistrationCount(pipelineId, CompilationContext::RegistrationPhase::Compile), 1);
     EXPECT_EQ(CompilationContext::getRegistrationCount(pipelineId, CompilationContext::RegistrationPhase::Start), 1);
-    EXPECT_GE(CompilationContext::getRegistrationDuration(pipelineId, CompilationContext::RegistrationPhase::Compile), std::chrono::nanoseconds::zero());
+    EXPECT_GE(
+        CompilationContext::getRegistrationDuration(pipelineId, CompilationContext::RegistrationPhase::Compile),
+        std::chrono::nanoseconds::zero());
 }
 
 TEST(CompilationContextTest, CompilationHookRecursesWithoutRunningSetup)
 {
     CompilationContext::resetRegistrationEvents();
-    nautilus::engine::Options options;
+    const nautilus::engine::Options options;
     const nautilus::engine::NautilusEngine engine(options);
-    MockPipelineExecutionContext pipelineExecutionContext(PipelineId(11));
     const auto operatorHandlerId = OperatorHandlerId(3);
-    auto operatorHandler = std::make_shared<TestOperatorHandler>();
-    pipelineExecutionContext.getOperatorHandlers().emplace(operatorHandlerId, operatorHandler);
 
     int compileCount = 0;
     int setupCount = 0;
     const PhysicalOperator root = ParentOperator(PhysicalOperator(CountingLeafOperator(compileCount, setupCount, operatorHandlerId)));
 
-    PipelineCompilationContext compilationContext(engine, pipelineExecutionContext);
+    CompilationContext compilationContext(engine);
     root.compile(compilationContext);
 
     EXPECT_EQ(compileCount, 1);
     EXPECT_EQ(setupCount, 0);
-    EXPECT_TRUE(operatorHandler->wasCompiled);
 }
 
 TEST(CompilationContextTest, CompilationOverrideCanStopRecursion)
 {
     CompilationContext::resetRegistrationEvents();
-    nautilus::engine::Options options;
+    const nautilus::engine::Options options;
     const nautilus::engine::NautilusEngine engine(options);
-    MockPipelineExecutionContext pipelineExecutionContext(PipelineId(12));
     const auto operatorHandlerId = OperatorHandlerId(4);
-    auto operatorHandler = std::make_shared<TestOperatorHandler>();
-    pipelineExecutionContext.getOperatorHandlers().emplace(operatorHandlerId, operatorHandler);
 
     int compileCount = 0;
     int setupCount = 0;
     const PhysicalOperator root = CompileStopOperator(PhysicalOperator(CountingLeafOperator(compileCount, setupCount, operatorHandlerId)));
 
-    PipelineCompilationContext compilationContext(engine, pipelineExecutionContext);
+    CompilationContext compilationContext(engine);
     root.compile(compilationContext);
 
     EXPECT_EQ(compileCount, 0);
     EXPECT_EQ(setupCount, 0);
-    EXPECT_FALSE(operatorHandler->wasCompiled);
 }
 }

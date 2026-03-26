@@ -30,8 +30,6 @@ class WindowProbePhysicalOperator : public PhysicalOperatorConcept
 public:
     explicit WindowProbePhysicalOperator(OperatorHandlerId operatorHandlerId, WindowMetaData windowMetaData);
 
-    void compile(PipelineCompilationContext& compilationContext) const override;
-
     /// The setup method is called for each pipeline during the query initialization procedure. Meaning that if
     /// multiple pipelines with the same operator (e.g. JoinBuild) have access to the same operator handler, this will lead to race conditions.
     /// Therefore, any setup to the operator handler should ONLY happen in the WindowProbePhysicalOperator.

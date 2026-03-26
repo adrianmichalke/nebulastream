@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <ostream>
@@ -53,7 +54,7 @@ class CompilationWallTimeGuard
 {
 public:
     explicit CompilationWallTimeGuard(int64_t compilationStartNanoseconds)
-        : compilationEndNanoseconds(0), hasCompilationEndNanoseconds(false)
+
     {
         const auto previousCompilationCount = activeCompilationCount.fetch_add(1);
         if (previousCompilationCount == 0)
@@ -81,6 +82,10 @@ public:
             = hasCompilationEndNanoseconds ? compilationEndNanoseconds : getNanosecondsSinceEpoch(std::chrono::steady_clock::now());
         compilationWallTimeNanoseconds.fetch_add(compilationIntervalEndNanoseconds - compilationIntervalStartNanoseconds);
     }
+
+private:
+    int64_t compilationEndNanoseconds{0};
+    bool hasCompilationEndNanoseconds{false};
 };
 }
 
