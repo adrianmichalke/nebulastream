@@ -30,6 +30,18 @@ class LogLevelTest : public Testing::BaseUnitTest
 {
 };
 
+TEST_F(LogLevelTest, suppressUnusedWarningDoesNotEvaluateArguments)
+{
+    bool argumentEvaluated = false;
+    auto markEvaluated = [&argumentEvaluated]
+    {
+        argumentEvaluated = true;
+        return 0;
+    };
+    SUPPRESS_UNUSED_WARNING(markEvaluated());
+    EXPECT_FALSE(argumentEvaluated);
+}
+
 TEST_F(LogLevelTest, testLogLevel)
 {
     constexpr auto filePath = "LogLevelTest.log";
